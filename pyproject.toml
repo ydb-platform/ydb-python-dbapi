@@ -15,13 +15,14 @@ pre-commit = "^4.0.1"
 ruff = "^0.6.9"
 mypy = "^1.11.2"
 poethepoet = "^0.29.0"
+types-protobuf = "^5.28.0.20240924"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poe.tasks]
-mypy = "mypy"
+mypy = "mypy ydb_dbapi"
 ruff-fix = "ruff check --fix"
 ruff = "ruff check"
 lint = ["mypy", "ruff"]
@@ -33,3 +34,14 @@ exclude = [".venv", ".git", "__pycache__", "build", "dist", "venv"]
 line-length = 79
 target-version = "py39"
 src = ["ydb_dbapi", "tests"]
+
+[tool.ruff.lint]
+select = ["F", "E"]
+
+[[tool.mypy.overrides]]
+module = "ydb.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "ydb_dbapi.errors"
+ignore_errors = true
