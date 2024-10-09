@@ -27,3 +27,9 @@ ruff = "ruff check"
 lint = ["mypy", "ruff"]
 format-check = "ruff format --check"
 format = "ruff format"
+
+[tool.ruff]
+exclude = [".venv", ".git", "__pycache__", "build", "dist", "venv"]
+line-length = 79
+target-version = "py39"
+src = ["ydb_dbapi", "tests"]
