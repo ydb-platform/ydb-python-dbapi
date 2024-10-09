@@ -13,7 +13,17 @@ ydb = "^3.18.1"
 [tool.poetry.group.dev.dependencies]
 pre-commit = "^4.0.1"
 ruff = "^0.6.9"
+mypy = "^1.11.2"
+poethepoet = "^0.29.0"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.poe.tasks]
+mypy = "mypy"
+ruff-fix = "ruff check --fix"
+ruff = "ruff check"
+lint = ["mypy", "ruff"]
+format-check = "ruff format --check"
+format = "ruff format"
