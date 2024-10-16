@@ -142,7 +142,7 @@ class Connection:
         return self.driver.table_client.describe_table(abs_table_path)
 
     @handle_ydb_errors
-    async def check_exists(self, table_path: str) -> ydb.SchemeEntry:
+    async def check_exists(self, table_path: str) -> bool:
         abs_table_path = posixpath.join(
             self.database, self.table_path_prefix, table_path
         )
@@ -154,7 +154,7 @@ class Connection:
         names = await self._get_table_names(abs_dir_path)
         return [posixpath.relpath(path, abs_dir_path) for path in names]
 
-    async def _check_path_exists(self, table_path: str) -> ydb.SchemeEntry:
+    async def _check_path_exists(self, table_path: str) -> bool:
         try:
             await retry_operation_async(
                 self.driver.scheme_client.describe_path, table_path
