@@ -55,3 +55,23 @@ async def driver(endpoint, database, event_loop):
     yield driver
 
     await driver.stop(timeout=10)
+
+
+@pytest.fixture
+async def session_pool(driver: ydb.aio.Driver, event_loop):
+    session_pool = ydb.aio.QuerySessionPool(driver)
+    async with session_pool:
+        await session_pool.execute_with_retries(
+            """DROP TABLE IF EXISTS table"""
+        )
+        await session_pool.execute_with_retries(
+            """
+            CREATE TABLE table (
+            id Int64 NOT NULL,
+            val Int64,
+            PRIMARY KEY(id)
+            )
+            """
+        )
+
+        yield session_pool
