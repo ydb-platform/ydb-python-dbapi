@@ -3,7 +3,6 @@ from contextlib import suppress
 import pytest
 import pytest_asyncio
 import ydb
-
 import ydb_dbapi as dbapi
 
 
@@ -13,7 +12,7 @@ class BaseDBApiTestSuit:
         connection: dbapi.Connection,
         isolation_level: str,
         read_only: bool,
-    ):
+    ) -> None:
         async with connection.cursor() as cursor:
             with suppress(dbapi.DatabaseError):
                 await cursor.execute("DROP TABLE foo")
@@ -25,14 +24,13 @@ class BaseDBApiTestSuit:
 
         connection.set_isolation_level(isolation_level)
 
-        await connection.begin()
-
         async with connection.cursor() as cursor:
             query = "UPSERT INTO foo(id) VALUES (1)"
             if read_only:
                 with pytest.raises(dbapi.DatabaseError):
                     await cursor.execute(query)
                     await cursor.finish_query()
+
             else:
                 await cursor.execute(query)
 
@@ -41,7 +39,7 @@ class BaseDBApiTestSuit:
         async with connection.cursor() as cursor:
             cursor.execute("DROP TABLE foo")
 
-    async def _test_connection(self, connection: dbapi.Connection):
+    async def _test_connection(self, connection: dbapi.Connection) -> None:
         await connection.commit()
         await connection.rollback()
 
@@ -68,7 +66,7 @@ class BaseDBApiTestSuit:
         await cur.execute("DROP TABLE foo")
         await cur.close()
 
-    async def _test_cursor_raw_query(self, connection: dbapi.Connection):
+    async def _test_cursor_raw_query(self, connection: dbapi.Connection) -> None:
         cur = connection.cursor()
         assert cur
 
@@ -107,7 +105,7 @@ class BaseDBApiTestSuit:
 
         await cur.close()
 
-    async def _test_errors(self, connection: dbapi.Connection):
+    async def _test_errors(self, connection: dbapi.Connection) -> None:
         with pytest.raises(dbapi.InterfaceError):
             await dbapi.connect("localhost:2136", database="/local666")
 
@@ -153,7 +151,7 @@ class TestAsyncConnection(BaseDBApiTestSuit):
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "isolation_level, read_only",
+        ("isolation_level", "read_only"),
         [
             (dbapi.IsolationLevel.SERIALIZABLE, False),
             (dbapi.IsolationLevel.AUTOCOMMIT, False),

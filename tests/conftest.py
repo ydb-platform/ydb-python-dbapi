@@ -1,13 +1,11 @@
+from __future__ import annotations
+
+from collections.abc import Generator
+from typing import Any
+from typing import Callable
+
 import pytest
 import ydb
-
-from typing import (
-    Any,
-    Callable,
-    Generator,
-    Optional,
-)
-
 from testcontainers.core.generic import DbContainer
 from testcontainers.core.generic import wait_container_is_ready
 from testcontainers.core.utils import setup_logger
@@ -18,7 +16,7 @@ logger = setup_logger(__name__)
 class YDBContainer(DbContainer):
     def __init__(
         self,
-        name: Optional[str] = None,
+        name: str | None = None,
         port: str = "2135",
         image: str = "ydbplatform/local-ydb:trunk",
         **kwargs: Any,
@@ -60,7 +58,7 @@ class YDBContainer(DbContainer):
         return self.get_exposed_port(self.port_to_expose)
 
     @wait_container_is_ready(ydb.ConnectionError)
-    def _connect(self):
+    def _connect(self) -> None:
         with ydb.Driver(
             connection_string=self.get_connection_string()
         ) as driver:
@@ -71,7 +69,7 @@ class YDBContainer(DbContainer):
                 msg = "Database is not ready"
                 raise ydb.ConnectionError(msg) from e
 
-    def _configure(self):
+    def _configure(self) -> None:
         self.with_bind_ports(self.port_to_expose, self.port_to_expose)
         if self._name:
             self.with_name(self._name)
@@ -80,7 +78,7 @@ class YDBContainer(DbContainer):
         self.with_env("GRPC_PORT", self.port_to_expose)
         self.with_env("GRPC_TLS_PORT", self.port_to_expose)
 
-    def _maybe_stop_old_container(self):
+    def _maybe_stop_old_container(self) -> None:
         if not self._name:
             return
         docker_client = self.get_docker_client()
@@ -116,7 +114,7 @@ def connection_kwargs(ydb_container: YDBContainer) -> dict:
     }
 
 
-@pytest.fixture()
+@pytest.fixture
 async def driver(ydb_container, event_loop):
     driver = ydb.aio.Driver(
         connection_string=ydb_container.get_connection_string()
@@ -147,3 +145,11 @@ async def session_pool(driver: ydb.aio.Driver):
         )
 
         yield session_pool
+
+@pytest.fixture
+async def session(session_pool: ydb.aio.QuerySessionPool):
+    session = await session_pool.acquire()
+
+    yield session
+
+    await session_pool.release(session)
