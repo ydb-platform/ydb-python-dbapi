@@ -1,3 +1,4 @@
+from enum import Enum
 import functools
 from typing import Iterator
 import ydb
@@ -48,6 +49,13 @@ def handle_ydb_errors(func):
             raise DatabaseError("Failed to execute query") from e
 
     return wrapper
+
+
+class CursorStatus(str, Enum):
+    ready = "ready"
+    running = "running"
+    finished = "finished"
+    closed = "closed"
 
 
 class AsyncFromSyncIterator:

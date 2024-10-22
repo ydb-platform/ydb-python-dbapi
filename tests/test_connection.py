@@ -14,26 +14,32 @@ class BaseDBApiTestSuit:
         isolation_level: str,
         read_only: bool,
     ):
-        await connection.cursor().execute(
-            "CREATE TABLE foo(id Int64 NOT NULL, PRIMARY KEY (id))"
-        )
-        connection.set_isolation_level(isolation_level)
+        async with connection.cursor() as cursor:
+            with suppress(dbapi.DatabaseError):
+                await cursor.execute("DROP TABLE foo")
 
-        cursor = connection.cursor()
+        async with connection.cursor() as cursor:
+            await cursor.execute(
+                "CREATE TABLE foo(id Int64 NOT NULL, PRIMARY KEY (id))"
+            )
+
+        connection.set_isolation_level(isolation_level)
 
         await connection.begin()
 
-        query = "UPSERT INTO foo(id) VALUES (1)"
-        if read_only:
-            with pytest.raises(dbapi.DatabaseError):
+        async with connection.cursor() as cursor:
+            query = "UPSERT INTO foo(id) VALUES (1)"
+            if read_only:
+                with pytest.raises(dbapi.DatabaseError):
+                    await cursor.execute(query)
+                    await cursor.finish_query()
+            else:
                 await cursor.execute(query)
-        else:
-            await cursor.execute(query)
 
         await connection.rollback()
 
-        await connection.cursor().execute("DROP TABLE foo")
-        await connection.cursor().close()
+        async with connection.cursor() as cursor:
+            cursor.execute("DROP TABLE foo")
 
     async def _test_connection(self, connection: dbapi.Connection):
         await connection.commit()
@@ -42,6 +48,7 @@ class BaseDBApiTestSuit:
         cur = connection.cursor()
         with suppress(dbapi.DatabaseError):
             await cur.execute("DROP TABLE foo")
+            await cur.finish_query()
 
         assert not await connection.check_exists("/local/foo")
         with pytest.raises(dbapi.ProgrammingError):
@@ -50,6 +57,7 @@ class BaseDBApiTestSuit:
         await cur.execute(
             "CREATE TABLE foo(id Int64 NOT NULL, PRIMARY KEY (id))"
         )
+        await cur.finish_query()
 
         assert await connection.check_exists("/local/foo")
 
@@ -66,10 +74,12 @@ class BaseDBApiTestSuit:
 
         with suppress(dbapi.DatabaseError):
             await cur.execute("DROP TABLE test")
+            await cur.finish_query()
 
         await cur.execute(
             "CREATE TABLE test(id Int64 NOT NULL, text Utf8, PRIMARY KEY (id))"
         )
+        await cur.finish_query()
 
         await cur.execute(
             """
@@ -91,6 +101,7 @@ class BaseDBApiTestSuit:
                 )
             },
         )
+        await cur.finish_query()
 
         await cur.execute("DROP TABLE test")
 
@@ -104,6 +115,7 @@ class BaseDBApiTestSuit:
 
         with suppress(dbapi.DatabaseError):
             await cur.execute("DROP TABLE test")
+            await cur.finish_query()
 
         with pytest.raises(dbapi.DataError):
             await cur.execute("SELECT 18446744073709551616")
@@ -118,8 +130,11 @@ class BaseDBApiTestSuit:
             await cur.execute("SELECT * FROM test")
 
         await cur.execute("CREATE TABLE test(id Int64, PRIMARY KEY (id))")
+        await cur.finish_query()
 
         await cur.execute("INSERT INTO test(id) VALUES(1)")
+        await cur.finish_query()
+
         with pytest.raises(dbapi.IntegrityError):
             await cur.execute("INSERT INTO test(id) VALUES(1)")
 
@@ -143,10 +158,10 @@ class TestAsyncConnection(BaseDBApiTestSuit):
         [
             (dbapi.IsolationLevel.SERIALIZABLE, False),
             (dbapi.IsolationLevel.AUTOCOMMIT, False),
-            # (dbapi.IsolationLevel.ONLINE_READONLY, True),
-            # (dbapi.IsolationLevel.ONLINE_READONLY_INCONSISTENT, True),
-            # (dbapi.IsolationLevel.STALE_READONLY, True),
-            # (dbapi.IsolationLevel.SNAPSHOT_READONLY, True),
+            (dbapi.IsolationLevel.ONLINE_READONLY, True),
+            (dbapi.IsolationLevel.ONLINE_READONLY_INCONSISTENT, True),
+            (dbapi.IsolationLevel.STALE_READONLY, True),
+            (dbapi.IsolationLevel.SNAPSHOT_READONLY, True),
         ],
     )
     async def test_isolation_level_read_only(
