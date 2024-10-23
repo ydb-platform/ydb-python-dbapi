@@ -133,6 +133,21 @@ async def driver(
 
 
 @pytest.fixture
+def driver_sync(
+    ydb_container: YDBContainer,
+) -> Generator[ydb.Driver]:
+    driver = ydb.Driver(
+        connection_string=ydb_container.get_connection_string()
+    )
+    driver.wait(timeout=15, fail_fast=True)
+
+    yield driver
+
+    driver.stop(timeout=10)
+    del driver
+
+
+@pytest.fixture
 async def session_pool(
     driver: ydb.aio.Driver,
 ) -> AsyncGenerator[ydb.aio.QuerySessionPool]:
@@ -155,6 +170,25 @@ async def session_pool(
 
 
 @pytest.fixture
+def session_pool_sync(
+    driver_sync: ydb.Driver,
+) -> Generator[ydb.QuerySessionPool]:
+    session_pool = ydb.QuerySessionPool(driver_sync)
+    with session_pool:
+        session_pool.execute_with_retries("""DROP TABLE IF EXISTS table""")
+        session_pool.execute_with_retries(
+            """
+            CREATE TABLE table (
+            id Int64 NOT NULL,
+            val Int64,
+            PRIMARY KEY(id)
+            )
+            """
+        )
+        yield session_pool
+
+
+@pytest.fixture
 async def session(
     session_pool: ydb.aio.QuerySessionPool,
 ) -> AsyncGenerator[ydb.aio.QuerySession]:
@@ -163,3 +197,14 @@ async def session(
     yield session
 
     await session_pool.release(session)
+
+
+@pytest.fixture
+def session_sync(
+    session_pool_sync: ydb.QuerySessionPool,
+) -> Generator[ydb.QuerySession]:
+    session = session_pool_sync.acquire()
+
+    yield session
+
+    session_pool_sync.release(session)
