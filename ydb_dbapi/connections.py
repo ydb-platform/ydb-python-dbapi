@@ -50,9 +50,7 @@ class BaseYDBConnection:
             "ydb_session_pool" in self.conn_kwargs
         ):  # Use session pool managed manually
             self._shared_session_pool = True
-            self._session_pool = self.conn_kwargs.pop(
-                "ydb_session_pool"
-            )
+            self._session_pool = self.conn_kwargs.pop("ydb_session_pool")
             self._driver = self._session_pool._driver
         else:
             self._shared_session_pool = False
@@ -127,13 +125,24 @@ class Connection(BaseYDBConnection):
     _ydb_driver_class = ydb.aio.Driver
     _ydb_session_pool_class = ydb.aio.QuerySessionPool
 
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
+    def __init__(
+        self,
+        host: str = "",
+        port: str = "",
+        database: str = "",
+        **conn_kwargs: Any,
+    ) -> None:
+        super().__init__(
+            host,
+            port,
+            database,
+            **conn_kwargs,
+        )
 
         self._session: ydb.aio.QuerySession | None = None
-        self._tx_context: ydb.QueryTxContext | None = None
+        self._tx_context: ydb.aio.QueryTxContext | None = None
 
-    async def _wait(self, timeout: int = 5) -> None:
+    async def wait_ready(self, timeout: int = 5) -> None:
         try:
             await self._driver.wait(timeout, fail_fast=True)
         except ydb.Error as e:
@@ -144,13 +153,13 @@ class Connection(BaseYDBConnection):
                 "Failed to connect to YDB, details "
                 f"{self._driver.discovery_debug_details()}"
             )
-            raise InterfaceError(
-                msg
-            ) from e
+            raise InterfaceError(msg) from e
 
         self._session = await self._session_pool.acquire()
 
-    def cursor(self):
+    def cursor(self) -> Cursor:
+        if self._session is None:
+            raise RuntimeError("Connection is not ready, use wait_ready.")
         if self._current_cursor and not self._current_cursor._closed:
             raise RuntimeError(
                 "Unable to create new Cursor before closing existing one."
@@ -218,12 +227,13 @@ class Connection(BaseYDBConnection):
                 await self._driver.scheme_client.describe_path(table_path)
 
             await retry_operation_async(callee)
-            return True
         except ydb.SchemeError:
             return False
+        else:
+            return True
 
     async def _get_table_names(self, abs_dir_path: str) -> list[str]:
-        async def callee():
+        async def callee() -> ydb.Directory:
             return await self._driver.scheme_client.list_directory(
                 abs_dir_path
             )
@@ -239,7 +249,7 @@ class Connection(BaseYDBConnection):
         return result
 
 
-async def connect(*args, **kwargs) -> Connection:
-    conn = Connection(*args, **kwargs)
-    await conn._wait()
+async def connect(*args: tuple, **kwargs: dict) -> Connection:
+    conn = Connection(*args, **kwargs)  # type: ignore
+    await conn.wait_ready()
     return conn

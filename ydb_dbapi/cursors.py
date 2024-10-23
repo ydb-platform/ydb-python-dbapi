@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import itertools
 from collections.abc import AsyncIterator
+from collections.abc import Generator
 from collections.abc import Iterator
 from typing import Any
 from typing import Union
 
 import ydb
+from typing_extensions import Self
 
 from .errors import DatabaseError
 from .errors import Error
@@ -53,20 +55,18 @@ class Cursor:
         self._state = CursorStatus.ready
 
     @property
-    def description(self):
+    def description(self) -> list[tuple] | None:
         return self._description
 
     @property
-    def rowcount(self):
+    def rowcount(self) -> int:
         return self._rows_count
 
     @handle_ydb_errors
     async def _execute_generic_query(
         self, query: str, parameters: ParametersType | None = None
     ) -> AsyncIterator[ydb.convert.ResultSet]:
-        return await self._session.execute(
-            query=query, parameters=parameters
-        )
+        return await self._session.execute(query=query, parameters=parameters)
 
     @handle_ydb_errors
     async def _execute_transactional_query(
@@ -126,7 +126,9 @@ class Cursor:
             for col in result_set.columns
         ]
 
-    def _rows_iterable(self, result_set):
+    def _rows_iterable(
+        self, result_set: ydb.convert.ResultSet
+    ) -> Generator[tuple]:
         try:
             for row in result_set.rows:
                 # returns tuple to be compatible with SqlAlchemy and because
@@ -212,8 +214,13 @@ class Cursor:
                 "Could not perform operation: Cursor is closed."
             )
 
-    async def __aenter__(self) -> Cursor:
+    async def __aenter__(self) -> Self:
         return self
 
-    async def __aexit__(self, exc_type, exc, tb) -> None:
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: object,
+    ) -> None:
         await self.close()
