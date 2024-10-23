@@ -16,6 +16,7 @@ class BaseDBApiTestSuit:
         isolation_level: str,
         read_only: bool,
     ) -> None:
+        connection.set_isolation_level("AUTOCOMMIT")
         async with connection.cursor() as cursor:
             with suppress(dbapi.DatabaseError):
                 await cursor.execute("DROP TABLE foo")
@@ -38,6 +39,8 @@ class BaseDBApiTestSuit:
                 await cursor.execute(query)
 
         await connection.rollback()
+
+        connection.set_isolation_level("AUTOCOMMIT")
 
         async with connection.cursor() as cursor:
             await cursor.execute("DROP TABLE foo")
