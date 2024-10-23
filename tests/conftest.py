@@ -3,6 +3,7 @@ from __future__ import annotations
 from asyncio import AbstractEventLoop
 from collections.abc import AsyncGenerator
 from collections.abc import Generator
+from concurrent.futures import TimeoutError
 from typing import Any
 from typing import Callable
 
@@ -60,7 +61,7 @@ class YDBContainer(DbContainer):
     def get_ydb_port(self) -> str:
         return self.get_exposed_port(self.port_to_expose)
 
-    @wait_container_is_ready(ydb.ConnectionError)
+    @wait_container_is_ready(ydb.ConnectionError, TimeoutError)
     def _connect(self) -> None:
         with ydb.Driver(
             connection_string=self.get_connection_string()
