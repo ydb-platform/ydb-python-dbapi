@@ -14,7 +14,6 @@ from .errors import InterfaceError
 from .errors import InternalError
 from .errors import NotSupportedError
 from .utils import handle_ydb_errors
-from .utils import handle_ydb_errors_async
 
 
 class IsolationLevel:
@@ -134,7 +133,7 @@ class Connection:
     def cursor(self) -> Cursor:
         if self._session is None:
             raise RuntimeError("Connection is not ready, use wait_ready.")
-        if self._current_cursor and not self._current_cursor._closed:
+        if self._current_cursor and not self._current_cursor.is_closed:
             raise RuntimeError(
                 "Unable to create new Cursor before closing existing one."
             )
@@ -329,7 +328,7 @@ class AsyncConnection:
     def cursor(self) -> AsyncCursor:
         if self._session is None:
             raise RuntimeError("Connection is not ready, use wait_ready.")
-        if self._current_cursor and not self._current_cursor._closed:
+        if self._current_cursor and not self._current_cursor.is_closed:
             raise RuntimeError(
                 "Unable to create new Cursor before closing existing one."
             )
@@ -369,21 +368,21 @@ class AsyncConnection:
             await self._session_pool.stop()
             await self._driver.stop()
 
-    @handle_ydb_errors_async
+    @handle_ydb_errors
     async def describe(self, table_path: str) -> ydb.TableSchemeEntry:
         abs_table_path = posixpath.join(
             self.database, self.table_path_prefix, table_path
         )
         return await self._driver.table_client.describe_table(abs_table_path)
 
-    @handle_ydb_errors_async
+    @handle_ydb_errors
     async def check_exists(self, table_path: str) -> bool:
         abs_table_path = posixpath.join(
             self.database, self.table_path_prefix, table_path
         )
         return await self._check_path_exists(abs_table_path)
 
-    @handle_ydb_errors_async
+    @handle_ydb_errors
     async def get_table_names(self) -> list[str]:
         abs_dir_path = posixpath.join(self.database, self.table_path_prefix)
         names = await self._get_table_names(abs_dir_path)

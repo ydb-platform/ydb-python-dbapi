@@ -21,7 +21,7 @@ class YDBContainer(DbContainer):
     def __init__(
         self,
         name: str | None = None,
-        port: str = "2135",
+        port: str = "2136",
         image: str = "ydbplatform/local-ydb:trunk",
         **kwargs: Any,
     ) -> None:
@@ -104,12 +104,12 @@ def ydb_container(
         yield ydb_container
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def connection_string(ydb_container: YDBContainer) -> str:
     return ydb_container.get_connection_string()
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def connection_kwargs(ydb_container: YDBContainer) -> dict:
     return {
         "host": ydb_container.get_ydb_host(),
@@ -120,12 +120,11 @@ def connection_kwargs(ydb_container: YDBContainer) -> dict:
 
 @pytest.fixture
 async def driver(
-    ydb_container: YDBContainer, event_loop: AbstractEventLoop
+    connection_string: str,
+    event_loop: AbstractEventLoop,
 ) -> AsyncGenerator[ydb.aio.Driver]:
-    driver = ydb.aio.Driver(
-        connection_string=ydb_container.get_connection_string()
-    )
-    await driver.wait(timeout=15, fail_fast=True)
+    driver = ydb.aio.Driver(connection_string=connection_string)
+    await driver.wait(timeout=10)
 
     yield driver
 
@@ -135,12 +134,10 @@ async def driver(
 
 @pytest.fixture
 def driver_sync(
-    ydb_container: YDBContainer,
+    connection_string: str,
 ) -> Generator[ydb.Driver]:
-    driver = ydb.Driver(
-        connection_string=ydb_container.get_connection_string()
-    )
-    driver.wait(timeout=15, fail_fast=True)
+    driver = ydb.Driver(connection_string=connection_string)
+    driver.wait(timeout=10)
 
     yield driver
 
@@ -187,25 +184,3 @@ def session_pool_sync(
             """
         )
         yield session_pool
-
-
-@pytest.fixture
-async def session(
-    session_pool: ydb.aio.QuerySessionPool,
-) -> AsyncGenerator[ydb.aio.QuerySession]:
-    session = await session_pool.acquire()
-
-    yield session
-
-    await session_pool.release(session)
-
-
-@pytest.fixture
-def session_sync(
-    session_pool_sync: ydb.QuerySessionPool,
-) -> Generator[ydb.QuerySession]:
-    session = session_pool_sync.acquire()
-
-    yield session
-
-    session_pool_sync.release(session)
