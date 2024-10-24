@@ -25,7 +25,63 @@ class IsolationLevel:
     AUTOCOMMIT = "AUTOCOMMIT"
 
 
-class Connection:
+class BaseConnection:
+    _tx_mode: ydb.BaseQueryTxMode = ydb.QuerySerializableReadWrite()
+    _tx_context: ydb.QueryTxContext | ydb.aio.QueryTxContext | None = None
+    interactive_transaction: bool = False
+
+    def set_isolation_level(self, isolation_level: str) -> None:
+        class IsolationSettings(NamedTuple):
+            ydb_mode: ydb.BaseQueryTxMode
+            interactive: bool
+
+        ydb_isolation_settings_map = {
+            IsolationLevel.AUTOCOMMIT: IsolationSettings(
+                ydb.QuerySerializableReadWrite(), interactive=False
+            ),
+            IsolationLevel.SERIALIZABLE: IsolationSettings(
+                ydb.QuerySerializableReadWrite(), interactive=True
+            ),
+            IsolationLevel.ONLINE_READONLY: IsolationSettings(
+                ydb.QueryOnlineReadOnly(), interactive=True
+            ),
+            IsolationLevel.ONLINE_READONLY_INCONSISTENT: IsolationSettings(
+                ydb.QueryOnlineReadOnly().with_allow_inconsistent_reads(),
+                interactive=True,
+            ),
+            IsolationLevel.STALE_READONLY: IsolationSettings(
+                ydb.QueryStaleReadOnly(), interactive=True
+            ),
+            IsolationLevel.SNAPSHOT_READONLY: IsolationSettings(
+                ydb.QuerySnapshotReadOnly(), interactive=True
+            ),
+        }
+        ydb_isolation_settings = ydb_isolation_settings_map[isolation_level]
+        if self._tx_context and self._tx_context.tx_id:
+            raise InternalError(
+                "Failed to set transaction mode: transaction is already began"
+            )
+        self._tx_mode = ydb_isolation_settings.ydb_mode
+        self.interactive_transaction = ydb_isolation_settings.interactive
+
+    def get_isolation_level(self) -> str:
+        if self._tx_mode.name == ydb.QuerySerializableReadWrite().name:
+            if self.interactive_transaction:
+                return IsolationLevel.SERIALIZABLE
+            return IsolationLevel.AUTOCOMMIT
+        if self._tx_mode.name == ydb.QueryOnlineReadOnly().name:
+            if self._tx_mode.settings.allow_inconsistent_reads:
+                return IsolationLevel.ONLINE_READONLY_INCONSISTENT
+            return IsolationLevel.ONLINE_READONLY
+        if self._tx_mode.name == ydb.QueryStaleReadOnly().name:
+            return IsolationLevel.STALE_READONLY
+        if self._tx_mode.name == ydb.QuerySnapshotReadOnly().name:
+            return IsolationLevel.SNAPSHOT_READONLY
+        msg = f"{self._tx_mode.name} is not supported"
+        raise NotSupportedError(msg)
+
+
+class Connection(BaseConnection):
     def __init__(
         self,
         host: str = "",
@@ -79,56 +135,6 @@ class Connection:
             raise InterfaceError(msg) from e
 
         self._session = self._session_pool.acquire()
-
-    def set_isolation_level(self, isolation_level: str) -> None:
-        class IsolationSettings(NamedTuple):
-            ydb_mode: ydb.BaseQueryTxMode
-            interactive: bool
-
-        ydb_isolation_settings_map = {
-            IsolationLevel.AUTOCOMMIT: IsolationSettings(
-                ydb.QuerySerializableReadWrite(), interactive=False
-            ),
-            IsolationLevel.SERIALIZABLE: IsolationSettings(
-                ydb.QuerySerializableReadWrite(), interactive=True
-            ),
-            IsolationLevel.ONLINE_READONLY: IsolationSettings(
-                ydb.QueryOnlineReadOnly(), interactive=True
-            ),
-            IsolationLevel.ONLINE_READONLY_INCONSISTENT: IsolationSettings(
-                ydb.QueryOnlineReadOnly().with_allow_inconsistent_reads(),
-                interactive=True,
-            ),
-            IsolationLevel.STALE_READONLY: IsolationSettings(
-                ydb.QueryStaleReadOnly(), interactive=True
-            ),
-            IsolationLevel.SNAPSHOT_READONLY: IsolationSettings(
-                ydb.QuerySnapshotReadOnly(), interactive=True
-            ),
-        }
-        ydb_isolation_settings = ydb_isolation_settings_map[isolation_level]
-        if self._tx_context and self._tx_context.tx_id:
-            raise InternalError(
-                "Failed to set transaction mode: transaction is already began"
-            )
-        self._tx_mode = ydb_isolation_settings.ydb_mode
-        self.interactive_transaction = ydb_isolation_settings.interactive
-
-    def get_isolation_level(self) -> str:
-        if self._tx_mode.name == ydb.QuerySerializableReadWrite().name:
-            if self.interactive_transaction:
-                return IsolationLevel.SERIALIZABLE
-            return IsolationLevel.AUTOCOMMIT
-        if self._tx_mode.name == ydb.QueryOnlineReadOnly().name:
-            if self._tx_mode.settings.allow_inconsistent_reads:
-                return IsolationLevel.ONLINE_READONLY_INCONSISTENT
-            return IsolationLevel.ONLINE_READONLY
-        if self._tx_mode.name == ydb.QueryStaleReadOnly().name:
-            return IsolationLevel.STALE_READONLY
-        if self._tx_mode.name == ydb.QuerySnapshotReadOnly().name:
-            return IsolationLevel.SNAPSHOT_READONLY
-        msg = f"{self._tx_mode.name} is not supported"
-        raise NotSupportedError(msg)
 
     def cursor(self) -> Cursor:
         if self._session is None:
@@ -220,7 +226,7 @@ class Connection:
         return result
 
 
-class AsyncConnection:
+class AsyncConnection(BaseConnection):
     def __init__(
         self,
         host: str = "",
@@ -274,56 +280,6 @@ class AsyncConnection:
             raise InterfaceError(msg) from e
 
         self._session = await self._session_pool.acquire()
-
-    def set_isolation_level(self, isolation_level: str) -> None:
-        class IsolationSettings(NamedTuple):
-            ydb_mode: ydb.BaseQueryTxMode
-            interactive: bool
-
-        ydb_isolation_settings_map = {
-            IsolationLevel.AUTOCOMMIT: IsolationSettings(
-                ydb.QuerySerializableReadWrite(), interactive=False
-            ),
-            IsolationLevel.SERIALIZABLE: IsolationSettings(
-                ydb.QuerySerializableReadWrite(), interactive=True
-            ),
-            IsolationLevel.ONLINE_READONLY: IsolationSettings(
-                ydb.QueryOnlineReadOnly(), interactive=True
-            ),
-            IsolationLevel.ONLINE_READONLY_INCONSISTENT: IsolationSettings(
-                ydb.QueryOnlineReadOnly().with_allow_inconsistent_reads(),
-                interactive=True,
-            ),
-            IsolationLevel.STALE_READONLY: IsolationSettings(
-                ydb.QueryStaleReadOnly(), interactive=True
-            ),
-            IsolationLevel.SNAPSHOT_READONLY: IsolationSettings(
-                ydb.QuerySnapshotReadOnly(), interactive=True
-            ),
-        }
-        ydb_isolation_settings = ydb_isolation_settings_map[isolation_level]
-        if self._tx_context and self._tx_context.tx_id:
-            raise InternalError(
-                "Failed to set transaction mode: transaction is already began"
-            )
-        self._tx_mode = ydb_isolation_settings.ydb_mode
-        self.interactive_transaction = ydb_isolation_settings.interactive
-
-    def get_isolation_level(self) -> str:
-        if self._tx_mode.name == ydb.QuerySerializableReadWrite().name:
-            if self.interactive_transaction:
-                return IsolationLevel.SERIALIZABLE
-            return IsolationLevel.AUTOCOMMIT
-        if self._tx_mode.name == ydb.QueryOnlineReadOnly().name:
-            if self._tx_mode.settings.allow_inconsistent_reads:
-                return IsolationLevel.ONLINE_READONLY_INCONSISTENT
-            return IsolationLevel.ONLINE_READONLY
-        if self._tx_mode.name == ydb.QueryStaleReadOnly().name:
-            return IsolationLevel.STALE_READONLY
-        if self._tx_mode.name == ydb.QuerySnapshotReadOnly().name:
-            return IsolationLevel.SNAPSHOT_READONLY
-        msg = f"{self._tx_mode.name} is not supported"
-        raise NotSupportedError(msg)
 
     def cursor(self) -> AsyncCursor:
         if self._session is None:
