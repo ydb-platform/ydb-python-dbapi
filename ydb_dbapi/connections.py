@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import posixpath
-from typing import Any
 from typing import NamedTuple
+from typing import TypedDict
 
 import ydb
+from typing_extensions import NotRequired
+from typing_extensions import Unpack
 from ydb.retries import retry_operation_async
 from ydb.retries import retry_operation_sync
 
@@ -25,10 +27,58 @@ class IsolationLevel:
     AUTOCOMMIT = "AUTOCOMMIT"
 
 
+class ConnectionKwargs(TypedDict):
+    credentials: NotRequired[ydb.AbstractCredentials]
+    ydb_table_path_prefix: NotRequired[str]
+    ydb_session_pool: NotRequired[
+        ydb.QuerySessionPool | ydb.aio.QuerySessionPool
+    ]
+
+
 class BaseConnection:
     _tx_mode: ydb.BaseQueryTxMode = ydb.QuerySerializableReadWrite()
     _tx_context: ydb.QueryTxContext | ydb.aio.QueryTxContext | None = None
     interactive_transaction: bool = False
+
+    _shared_session_pool: bool = False
+    _driver_cls = ydb.Driver
+    _driver: ydb.Driver | ydb.aio.Driver
+    _pool_cls = ydb.QuerySessionPool
+    _pool: ydb.QuerySessionPool | ydb.aio.QuerySessionPool
+
+    _current_cursor: AsyncCursor | Cursor | None = None
+
+    def __init__(
+        self,
+        host: str = "",
+        port: str = "",
+        database: str = "",
+        **conn_kwargs: Unpack[ConnectionKwargs],
+    ) -> None:
+        self.endpoint = f"grpc://{host}:{port}"
+        self.database = database
+        self.conn_kwargs = conn_kwargs
+        self.credentials = self.conn_kwargs.pop("credentials", None)
+        self.table_path_prefix = self.conn_kwargs.pop(
+            "ydb_table_path_prefix", ""
+        )
+
+        if (
+            "ydb_session_pool" in self.conn_kwargs
+        ):  # Use session pool managed manually
+            self._shared_session_pool = True
+            self._session_pool = self.conn_kwargs.pop("ydb_session_pool")
+            self._driver = self._session_pool._driver
+        else:
+            driver_config = ydb.DriverConfig(
+                endpoint=self.endpoint,
+                database=self.database,
+                credentials=self.credentials,
+            )
+            self._driver = self._driver_cls(driver_config)
+            self._session_pool = self._pool_cls(self._driver, size=5)
+
+        self._session: ydb.QuerySession | ydb.aio.QuerySession | None = None
 
     def set_isolation_level(self, isolation_level: str) -> None:
         class IsolationSettings(NamedTuple):
@@ -82,44 +132,12 @@ class BaseConnection:
 
 
 class Connection(BaseConnection):
-    def __init__(
-        self,
-        host: str = "",
-        port: str = "",
-        database: str = "",
-        **conn_kwargs: Any,
-    ) -> None:
-        self.endpoint = f"grpc://{host}:{port}"
-        self.database = database
-        self.conn_kwargs = conn_kwargs
-        self.credentials = self.conn_kwargs.pop("credentials", None)
-        self.table_path_prefix = self.conn_kwargs.pop(
-            "ydb_table_path_prefix", ""
-        )
+    _driver_cls = ydb.Driver
+    _pool_cls = ydb.QuerySessionPool
 
-        if (
-            "ydb_session_pool" in self.conn_kwargs
-        ):  # Use session pool managed manually
-            self._shared_session_pool = True
-            self._session_pool = self.conn_kwargs.pop("ydb_session_pool")
-            self._driver: ydb.Driver = self._session_pool._driver
-        else:
-            self._shared_session_pool = False
-            driver_config = ydb.DriverConfig(
-                endpoint=self.endpoint,
-                database=self.database,
-                credentials=self.credentials,
-            )
-            self._driver = ydb.Driver(driver_config)
-            self._session_pool = ydb.QuerySessionPool(self._driver, size=5)
-
-        self._tx_mode: ydb.BaseQueryTxMode = ydb.QuerySerializableReadWrite()
-
-        self._current_cursor: Cursor | None = None
-        self.interactive_transaction: bool = False
-
-        self._session: ydb.QuerySession | None = None
-        self._tx_context: ydb.QueryTxContext | None = None
+    _driver: ydb.Driver
+    _pool: ydb.QuerySessionPool
+    _current_cursor: Cursor | None = None
 
     def wait_ready(self, timeout: int = 10) -> None:
         try:
@@ -227,44 +245,12 @@ class Connection(BaseConnection):
 
 
 class AsyncConnection(BaseConnection):
-    def __init__(
-        self,
-        host: str = "",
-        port: str = "",
-        database: str = "",
-        **conn_kwargs: Any,
-    ) -> None:
-        self.endpoint = f"grpc://{host}:{port}"
-        self.database = database
-        self.conn_kwargs = conn_kwargs
-        self.credentials = self.conn_kwargs.pop("credentials", None)
-        self.table_path_prefix = self.conn_kwargs.pop(
-            "ydb_table_path_prefix", ""
-        )
+    _driver_cls = ydb.aio.Driver
+    _pool_cls = ydb.aio.QuerySessionPool
 
-        if (
-            "ydb_session_pool" in self.conn_kwargs
-        ):  # Use session pool managed manually
-            self._shared_session_pool = True
-            self._session_pool = self.conn_kwargs.pop("ydb_session_pool")
-            self._driver: ydb.aio.Driver = self._session_pool._driver
-        else:
-            self._shared_session_pool = False
-            driver_config = ydb.DriverConfig(
-                endpoint=self.endpoint,
-                database=self.database,
-                credentials=self.credentials,
-            )
-            self._driver = ydb.aio.Driver(driver_config)
-            self._session_pool = ydb.aio.QuerySessionPool(self._driver, size=5)
-
-        self._tx_mode: ydb.BaseQueryTxMode = ydb.QuerySerializableReadWrite()
-
-        self._current_cursor: AsyncCursor | None = None
-        self.interactive_transaction: bool = False
-
-        self._session: ydb.aio.QuerySession | None = None
-        self._tx_context: ydb.aio.QueryTxContext | None = None
+    _driver: ydb.aio.Driver
+    _pool: ydb.aio.QuerySessionPool
+    _current_cursor: AsyncCursor | None = None
 
     async def wait_ready(self, timeout: int = 10) -> None:
         try:
