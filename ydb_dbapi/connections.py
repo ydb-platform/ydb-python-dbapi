@@ -39,11 +39,13 @@ class BaseConnection:
     _tx_mode: ydb.BaseQueryTxMode = ydb.QuerySerializableReadWrite()
     _tx_context: ydb.QueryTxContext | ydb.aio.QueryTxContext | None = None
     interactive_transaction: bool = False
-
     _shared_session_pool: bool = False
+
     _driver_cls = ydb.Driver
-    _driver: ydb.Driver | ydb.aio.Driver
     _pool_cls = ydb.QuerySessionPool
+    _cursor_cls: type[Cursor | AsyncCursor] = Cursor
+
+    _driver: ydb.Driver | ydb.aio.Driver
     _pool: ydb.QuerySessionPool | ydb.aio.QuerySessionPool
 
     _current_cursor: AsyncCursor | Cursor | None = None
@@ -130,10 +132,31 @@ class BaseConnection:
         msg = f"{self._tx_mode.name} is not supported"
         raise NotSupportedError(msg)
 
+    def cursor(self) -> Cursor | AsyncCursor:
+        if self._session is None:
+            raise RuntimeError("Connection is not ready, use wait_ready.")
+        if self._current_cursor and not self._current_cursor.is_closed:
+            raise RuntimeError(
+                "Unable to create new Cursor before closing existing one."
+            )
+
+        if self.interactive_transaction:
+            self._tx_context = self._session.transaction(self._tx_mode)
+        else:
+            self._tx_context = None
+
+        self._current_cursor = self._cursor_cls(
+            session=self._session,
+            tx_context=self._tx_context,
+            autocommit=(not self.interactive_transaction),
+        )
+        return self._current_cursor
+
 
 class Connection(BaseConnection):
     _driver_cls = ydb.Driver
     _pool_cls = ydb.QuerySessionPool
+    _cursor_cls = Cursor
 
     _driver: ydb.Driver
     _pool: ydb.QuerySessionPool
@@ -153,26 +176,6 @@ class Connection(BaseConnection):
             raise InterfaceError(msg) from e
 
         self._session = self._session_pool.acquire()
-
-    def cursor(self) -> Cursor:
-        if self._session is None:
-            raise RuntimeError("Connection is not ready, use wait_ready.")
-        if self._current_cursor and not self._current_cursor.is_closed:
-            raise RuntimeError(
-                "Unable to create new Cursor before closing existing one."
-            )
-
-        if self.interactive_transaction:
-            self._tx_context = self._session.transaction(self._tx_mode)
-        else:
-            self._tx_context = None
-
-        self._current_cursor = Cursor(
-            session=self._session,
-            tx_context=self._tx_context,
-            autocommit=(not self.interactive_transaction),
-        )
-        return self._current_cursor
 
     def commit(self) -> None:
         if self._tx_context and self._tx_context.tx_id:
@@ -247,6 +250,7 @@ class Connection(BaseConnection):
 class AsyncConnection(BaseConnection):
     _driver_cls = ydb.aio.Driver
     _pool_cls = ydb.aio.QuerySessionPool
+    _cursor_cls = AsyncCursor
 
     _driver: ydb.aio.Driver
     _pool: ydb.aio.QuerySessionPool
@@ -266,26 +270,6 @@ class AsyncConnection(BaseConnection):
             raise InterfaceError(msg) from e
 
         self._session = await self._session_pool.acquire()
-
-    def cursor(self) -> AsyncCursor:
-        if self._session is None:
-            raise RuntimeError("Connection is not ready, use wait_ready.")
-        if self._current_cursor and not self._current_cursor.is_closed:
-            raise RuntimeError(
-                "Unable to create new Cursor before closing existing one."
-            )
-
-        if self.interactive_transaction:
-            self._tx_context = self._session.transaction(self._tx_mode)
-        else:
-            self._tx_context = None
-
-        self._current_cursor = AsyncCursor(
-            session=self._session,
-            tx_context=self._tx_context,
-            autocommit=(not self.interactive_transaction),
-        )
-        return self._current_cursor
 
     async def commit(self) -> None:
         if self._tx_context and self._tx_context.tx_id:
