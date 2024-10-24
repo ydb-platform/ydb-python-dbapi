@@ -127,16 +127,29 @@ class Cursor(BaseCursor):
         tx_context: ydb.QueryTxContext | None = None,
         table_path_prefix: str = "",
         autocommit: bool = True,
+        auto_scroll_result_sets: bool = False,
     ) -> None:
         self._session = session
         self._tx_context = tx_context
         self._table_path_prefix = table_path_prefix
         self._autocommit = autocommit
+        self._auto_scroll = auto_scroll_result_sets
 
         self._stream: Iterator | None = None
 
     def fetchone(self) -> tuple | None:
-        return self._fetchone_from_buffer()
+        row = self._fetchone_from_buffer()
+        if not self._auto_scroll:
+            return row
+
+        if row is None:
+            while self.nextset():
+                # We should skip empty result sets
+                row = self._fetchone_from_buffer()
+                if row is not None:
+                    return row
+
+        return row
 
     def fetchmany(self, size: int | None = None) -> list | None:
         return self._fetchmany_from_buffer(size)

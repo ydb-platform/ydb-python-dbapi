@@ -218,3 +218,18 @@ class TestCursor:
 
             nextset = cursor.nextset()
             assert not nextset
+
+    def test_cursor_autoscroll(self, session_sync: ydb.QuerySession) -> None:
+        with ydb_dbapi.Cursor(
+            session=session_sync, auto_scroll_result_sets=True
+        ) as cursor:
+            yql_text = "SELECT 1 as val; SELECT 2 as val; SELECT 3 as val;"
+            cursor.execute(query=yql_text)
+
+            for i in range(3):
+                res = cursor.fetchone()
+                assert res is not None
+                assert res[0] == i + 1
+
+            assert cursor.fetchone() is None
+            assert not cursor.nextset()
