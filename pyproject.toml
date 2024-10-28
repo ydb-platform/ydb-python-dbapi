@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "ydb-dbapi"
-version = "0.1.0"
+version = "0.0.0"
 description = ""
 authors = ["Oleg Ovcharuk <vgvoleg@gmail.com>"]
 readme = "README.md"
