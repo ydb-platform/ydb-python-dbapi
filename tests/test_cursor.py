@@ -1,363 +1,220 @@
+from collections.abc import AsyncGenerator
+from collections.abc import Generator
+
 import pytest
+import ydb
 import ydb_dbapi
-from ydb import QuerySession as QuerySessionSync
-from ydb.aio import QuerySession
+
+INSERT_YQL = """
+DELETE FROM table;
+INSERT INTO table (id, val) VALUES
+(1, 1),
+(2, 2),
+(3, 3),
+(4, 4)
+"""
+
+
+@pytest.fixture
+async def session(
+    session_pool: ydb.aio.QuerySessionPool,
+) -> AsyncGenerator[ydb.aio.QuerySession]:
+    await session_pool.execute_with_retries(INSERT_YQL)
+
+    session = await session_pool.acquire()
+    yield session
+    await session_pool.release(session)
+
+
+@pytest.fixture
+def session_sync(
+    session_pool_sync: ydb.QuerySessionPool,
+) -> Generator[ydb.QuerySession]:
+    session_pool_sync.execute_with_retries(INSERT_YQL)
+
+    session = session_pool_sync.acquire()
+    yield session
+    session_pool_sync.release(session)
 
 
 class TestAsyncCursor:
     @pytest.mark.asyncio
-    async def test_cursor_ddl(self, session: QuerySession) -> None:
-        cursor = ydb_dbapi.AsyncCursor(session=session)
+    async def test_cursor_fetch_one(
+        self, session: ydb.aio.QuerySession
+    ) -> None:
+        async with ydb_dbapi.AsyncCursor(session=session) as cursor:
+            yql_text = """
+            SELECT id, val FROM table
+            """
+            await cursor.execute(query=yql_text)
 
-        yql = """
-            CREATE TABLE table (
-            id Int64 NOT NULL,
-            val Int64,
-            PRIMARY KEY(id)
-            )
-        """
+            for i in range(4):
+                res = await cursor.fetchone()
+                assert res is not None
+                assert res[0] == i + 1
 
-        with pytest.raises(ydb_dbapi.Error):
-            await cursor.execute(query=yql)
-
-        yql = """
-        DROP TABLE table
-        """
-
-        await cursor.execute(query=yql)
-
-        assert cursor.fetchone() is None
+            assert await cursor.fetchone() is None
 
     @pytest.mark.asyncio
-    async def test_cursor_dml(self, session: QuerySession) -> None:
-        cursor = ydb_dbapi.AsyncCursor(session=session)
-        yql_text = """
-        INSERT INTO table (id, val) VALUES
-        (1, 1),
-        (2, 2),
-        (3, 3)
-        """
+    async def test_cursor_fetch_many(
+        self, session: ydb.aio.QuerySession
+    ) -> None:
+        async with ydb_dbapi.AsyncCursor(session=session) as cursor:
+            yql_text = """
+            SELECT id, val FROM table
+            """
+            await cursor.execute(query=yql_text)
 
-        await cursor.execute(query=yql_text)
-        assert cursor.fetchone() is None
+            res = await cursor.fetchmany()
+            assert res is not None
+            assert len(res) == 1
+            assert res[0][0] == 1
 
-        cursor = ydb_dbapi.AsyncCursor(session=session)
+            res = await cursor.fetchmany(size=2)
+            assert res is not None
+            assert len(res) == 2
+            assert res[0][0] == 2
+            assert res[1][0] == 3
 
-        yql_text = """
-        SELECT COUNT(*) FROM table as sum
-        """
+            res = await cursor.fetchmany(size=2)
+            assert res is not None
+            assert len(res) == 1
+            assert res[0][0] == 4
 
-        await cursor.execute(query=yql_text)
-
-        res = cursor.fetchone()
-        assert res is not None
-        assert len(res) == 1
-        assert res[0] == 3
-
-    @pytest.mark.asyncio
-    async def test_cursor_fetch_one(self, session: QuerySession) -> None:
-        cursor = ydb_dbapi.AsyncCursor(session=session)
-        yql_text = """
-        INSERT INTO table (id, val) VALUES
-        (1, 1),
-        (2, 2)
-        """
-
-        await cursor.execute(query=yql_text)
-        assert cursor.fetchone() is None
-
-        cursor = ydb_dbapi.AsyncCursor(session=session)
-
-        yql_text = """
-        SELECT id, val FROM table
-        """
-
-        await cursor.execute(query=yql_text)
-
-        res = cursor.fetchone()
-        assert res is not None
-        assert res[0] == 1
-
-        res = cursor.fetchone()
-        assert res is not None
-        assert res[0] == 2
-
-        assert cursor.fetchone() is None
+            assert await cursor.fetchmany(size=2) is None
 
     @pytest.mark.asyncio
-    async def test_cursor_fetch_many(self, session: QuerySession) -> None:
-        cursor = ydb_dbapi.AsyncCursor(session=session)
-        yql_text = """
-        INSERT INTO table (id, val) VALUES
-        (1, 1),
-        (2, 2),
-        (3, 3),
-        (4, 4)
-        """
+    async def test_cursor_fetch_all(
+        self, session: ydb.aio.QuerySession
+    ) -> None:
+        async with ydb_dbapi.AsyncCursor(session=session) as cursor:
+            yql_text = """
+            SELECT id, val FROM table
+            """
+            await cursor.execute(query=yql_text)
 
-        await cursor.execute(query=yql_text)
-        assert cursor.fetchone() is None
+            assert cursor.rowcount == 4
 
-        cursor = ydb_dbapi.AsyncCursor(session=session)
+            res = await cursor.fetchall()
+            assert res is not None
+            assert len(res) == 4
+            for i in range(4):
+                assert res[i][0] == i + 1
 
-        yql_text = """
-        SELECT id, val FROM table
-        """
-
-        await cursor.execute(query=yql_text)
-
-        res = cursor.fetchmany()
-        assert res is not None
-        assert len(res) == 1
-        assert res[0][0] == 1
-
-        res = cursor.fetchmany(size=2)
-        assert res is not None
-        assert len(res) == 2
-        assert res[0][0] == 2
-        assert res[1][0] == 3
-
-        res = cursor.fetchmany(size=2)
-        assert res is not None
-        assert len(res) == 1
-        assert res[0][0] == 4
-
-        assert cursor.fetchmany(size=2) is None
+            assert await cursor.fetchall() is None
 
     @pytest.mark.asyncio
-    async def test_cursor_fetch_all(self, session: QuerySession) -> None:
-        cursor = ydb_dbapi.AsyncCursor(session=session)
-        yql_text = """
-        INSERT INTO table (id, val) VALUES
-        (1, 1),
-        (2, 2),
-        (3, 3)
-        """
+    async def test_cursor_next_set(
+        self, session: ydb.aio.QuerySession
+    ) -> None:
+        async with ydb_dbapi.AsyncCursor(session=session) as cursor:
+            yql_text = """SELECT 1 as val; SELECT 2 as val;"""
+            await cursor.execute(query=yql_text)
 
-        await cursor.execute(query=yql_text)
-        assert cursor.fetchone() is None
+            res = await cursor.fetchall()
+            assert res is not None
+            assert len(res) == 1
+            assert res[0][0] == 1
 
-        cursor = ydb_dbapi.AsyncCursor(session=session)
+            nextset = await cursor.nextset()
+            assert nextset
 
-        yql_text = """
-        SELECT id, val FROM table
-        """
+            res = await cursor.fetchall()
+            assert res is not None
+            assert len(res) == 1
+            assert res[0][0] == 2
 
-        await cursor.execute(query=yql_text)
+            nextset = await cursor.nextset()
+            assert nextset
 
-        assert cursor.rowcount == 3
+            assert await cursor.fetchall() is None
 
-        res = cursor.fetchall()
-        assert res is not None
-        assert len(res) == 3
-        assert res[0][0] == 1
-        assert res[1][0] == 2
-        assert res[2][0] == 3
-
-        assert cursor.fetchall() is None
-
-    @pytest.mark.asyncio
-    async def test_cursor_next_set(self, session: QuerySession) -> None:
-        cursor = ydb_dbapi.AsyncCursor(session=session)
-        yql_text = """SELECT 1 as val; SELECT 2 as val;"""
-
-        await cursor.execute(query=yql_text)
-
-        res = cursor.fetchall()
-        assert res is not None
-        assert len(res) == 1
-        assert res[0][0] == 1
-
-        nextset = await cursor.nextset()
-        assert nextset
-
-        res = cursor.fetchall()
-        assert res is not None
-        assert len(res) == 1
-        assert res[0][0] == 2
-
-        nextset = await cursor.nextset()
-        assert nextset
-
-        assert cursor.fetchall() is None
-
-        nextset = await cursor.nextset()
-        assert not nextset
+            nextset = await cursor.nextset()
+            assert not nextset
 
 
 # The same test class as above but for Cursor
 
 
 class TestCursor:
-    def test_cursor_ddl(self, session_sync: QuerySessionSync) -> None:
-        cursor = ydb_dbapi.Cursor(session=session_sync)
+    def test_cursor_fetch_one(self, session_sync: ydb.QuerySession) -> None:
+        with ydb_dbapi.Cursor(session=session_sync) as cursor:
+            yql_text = """
+            SELECT id, val FROM table
+            """
+            cursor.execute(query=yql_text)
 
-        yql = """
-            CREATE TABLE table (
-            id Int64 NOT NULL,
-            val Int64,
-            PRIMARY KEY(id)
-            )
-        """
+            for i in range(4):
+                res = cursor.fetchone()
+                assert res is not None
+                assert res[0] == i + 1
 
-        with pytest.raises(ydb_dbapi.Error):
-            cursor.execute(query=yql)
+            assert cursor.fetchone() is None
 
-        yql = """
-        DROP TABLE table
-        """
+    def test_cursor_fetch_many(self, session_sync: ydb.QuerySession) -> None:
+        with ydb_dbapi.Cursor(session=session_sync) as cursor:
+            yql_text = """
+            SELECT id, val FROM table
+            """
+            cursor.execute(query=yql_text)
 
-        cursor.execute(query=yql)
+            res = cursor.fetchmany()
+            assert res is not None
+            assert len(res) == 1
+            assert res[0][0] == 1
 
-        assert cursor.fetchone() is None
+            res = cursor.fetchmany(size=2)
+            assert res is not None
+            assert len(res) == 2
+            assert res[0][0] == 2
+            assert res[1][0] == 3
 
-    def test_cursor_dml(self, session_sync: QuerySessionSync) -> None:
-        cursor = ydb_dbapi.Cursor(session=session_sync)
-        yql_text = """
-        INSERT INTO table (id, val) VALUES
-        (1, 1),
-        (2, 2),
-        (3, 3)
-        """
+            res = cursor.fetchmany(size=2)
+            assert res is not None
+            assert len(res) == 1
+            assert res[0][0] == 4
 
-        cursor.execute(query=yql_text)
-        assert cursor.fetchone() is None
+            assert cursor.fetchmany(size=2) is None
 
-        cursor = ydb_dbapi.Cursor(session=session_sync)
+    def test_cursor_fetch_all(self, session_sync: ydb.QuerySession) -> None:
+        with ydb_dbapi.Cursor(session=session_sync) as cursor:
+            yql_text = """
+            SELECT id, val FROM table
+            """
+            cursor.execute(query=yql_text)
 
-        yql_text = """
-        SELECT COUNT(*) FROM table as sum
-        """
+            assert cursor.rowcount == 4
 
-        cursor.execute(query=yql_text)
+            res = cursor.fetchall()
+            assert res is not None
+            assert len(res) == 4
+            for i in range(4):
+                assert res[i][0] == i + 1
 
-        res = cursor.fetchone()
-        assert res is not None
-        assert len(res) == 1
-        assert res[0] == 3
+            assert cursor.fetchall() is None
 
-    def test_cursor_fetch_one(self, session_sync: QuerySessionSync) -> None:
-        cursor = ydb_dbapi.Cursor(session=session_sync)
-        yql_text = """
-        INSERT INTO table (id, val) VALUES
-        (1, 1),
-        (2, 2)
-        """
+    def test_cursor_next_set(self, session_sync: ydb.QuerySession) -> None:
+        with ydb_dbapi.Cursor(session=session_sync) as cursor:
+            yql_text = """SELECT 1 as val; SELECT 2 as val;"""
+            cursor.execute(query=yql_text)
 
-        cursor.execute(query=yql_text)
-        assert cursor.fetchone() is None
+            res = cursor.fetchall()
+            assert res is not None
+            assert len(res) == 1
+            assert res[0][0] == 1
 
-        cursor = ydb_dbapi.Cursor(session=session_sync)
+            nextset = cursor.nextset()
+            assert nextset
 
-        yql_text = """
-        SELECT id, val FROM table
-        """
+            res = cursor.fetchall()
+            assert res is not None
+            assert len(res) == 1
+            assert res[0][0] == 2
 
-        cursor.execute(query=yql_text)
+            nextset = cursor.nextset()
+            assert nextset
 
-        res = cursor.fetchone()
-        assert res is not None
-        assert res[0] == 1
+            assert cursor.fetchall() is None
 
-        res = cursor.fetchone()
-        assert res is not None
-        assert res[0] == 2
-
-        assert cursor.fetchone() is None
-
-    def test_cursor_fetch_many(self, session_sync: QuerySessionSync) -> None:
-        cursor = ydb_dbapi.Cursor(session=session_sync)
-        yql_text = """
-        INSERT INTO table (id, val) VALUES
-        (1, 1),
-        (2, 2),
-        (3, 3),
-        (4, 4)
-        """
-
-        cursor.execute(query=yql_text)
-        assert cursor.fetchone() is None
-
-        cursor = ydb_dbapi.Cursor(session=session_sync)
-
-        yql_text = """
-        SELECT id, val FROM table
-        """
-
-        cursor.execute(query=yql_text)
-
-        res = cursor.fetchmany()
-        assert res is not None
-        assert len(res) == 1
-        assert res[0][0] == 1
-
-        res = cursor.fetchmany(size=2)
-        assert res is not None
-        assert len(res) == 2
-        assert res[0][0] == 2
-        assert res[1][0] == 3
-
-        res = cursor.fetchmany(size=2)
-        assert res is not None
-        assert len(res) == 1
-        assert res[0][0] == 4
-
-        assert cursor.fetchmany(size=2) is None
-
-    def test_cursor_fetch_all(self, session_sync: QuerySessionSync) -> None:
-        cursor = ydb_dbapi.Cursor(session=session_sync)
-        yql_text = """
-        INSERT INTO table (id, val) VALUES
-        (1, 1),
-        (2, 2),
-        (3, 3)
-        """
-
-        cursor.execute(query=yql_text)
-        assert cursor.fetchone() is None
-
-        cursor = ydb_dbapi.Cursor(session=session_sync)
-
-        yql_text = """
-        SELECT id, val FROM table
-        """
-
-        cursor.execute(query=yql_text)
-
-        assert cursor.rowcount == 3
-
-        res = cursor.fetchall()
-        assert res is not None
-        assert len(res) == 3
-        assert res[0][0] == 1
-        assert res[1][0] == 2
-        assert res[2][0] == 3
-
-        assert cursor.fetchall() is None
-
-    def test_cursor_next_set(self, session_sync: QuerySessionSync) -> None:
-        cursor = ydb_dbapi.Cursor(session=session_sync)
-        yql_text = """SELECT 1 as val; SELECT 2 as val;"""
-
-        cursor.execute(query=yql_text)
-
-        res = cursor.fetchall()
-        assert res is not None
-        assert len(res) == 1
-        assert res[0][0] == 1
-
-        nextset = cursor.nextset()
-        assert nextset
-
-        res = cursor.fetchall()
-        assert res is not None
-        assert len(res) == 1
-        assert res[0][0] == 2
-
-        nextset = cursor.nextset()
-        assert nextset
-
-        assert cursor.fetchall() is None
-
-        nextset = cursor.nextset()
-        assert not nextset
+            nextset = cursor.nextset()
+            assert not nextset
