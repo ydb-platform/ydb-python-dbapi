@@ -144,9 +144,8 @@ class BaseDBApiTestSuit:
 
 class TestAsyncConnection(BaseDBApiTestSuit):
     @pytest_asyncio.fixture
-    async def connection(self, endpoint, database):
-        host, port = endpoint.split(":")
-        conn = await dbapi.connect(host=host, port=port, database=database)
+    async def connection(self, connection_kwargs):
+        conn = await dbapi.connect(**connection_kwargs)
         try:
             yield conn
         finally:

@@ -1,56 +1,127 @@
-import os
 import pytest
-import time
 import ydb
 
+from typing import (
+    Any,
+    Callable,
+    Generator,
+    Optional,
+)
 
-@pytest.fixture(scope="module")
-def docker_compose_file(pytestconfig):
-    return os.path.join(str(pytestconfig.rootdir), "docker-compose.yml")
+from testcontainers.core.generic import DbContainer
+from testcontainers.core.generic import wait_container_is_ready
+from testcontainers.core.utils import setup_logger
+
+logger = setup_logger(__name__)
 
 
-def wait_container_ready(driver):
-    driver.wait(timeout=30)
+class YDBContainer(DbContainer):
+    def __init__(
+        self,
+        name: Optional[str] = None,
+        port: str = "2135",
+        image: str = "ydbplatform/local-ydb:trunk",
+        **kwargs: Any,
+    ) -> None:
+        docker_client_kw: dict[str, Any] = kwargs.pop("docker_client_kw", {})
+        docker_client_kw["timeout"] = docker_client_kw.get("timeout") or 300
+        super().__init__(
+            image=image,
+            hostname="localhost",
+            docker_client_kw=docker_client_kw,
+            **kwargs,
+        )
+        self.port_to_expose = port
+        self._name = name
+        self._database_name = "local"
 
-    with ydb.SessionPool(driver) as pool:
-        started_at = time.time()
-        while time.time() - started_at < 30:
+    def start(self):
+        self._maybe_stop_old_container()
+        super().start()
+        return self
+
+    def get_connection_url(self, driver: str = "ydb") -> str:
+        host = self.get_container_host_ip()
+        port = self.get_exposed_port(self.port_to_expose)
+        return f"yql+{driver}://{host}:{port}/local"
+
+    def get_connection_string(self) -> str:
+        host = self.get_container_host_ip()
+        port = self.get_exposed_port(self.port_to_expose)
+        return f"grpc://{host}:{port}/?database=/local"
+
+    def get_ydb_database_name(self) -> str:
+        return self._database_name
+
+    def get_ydb_host(self) -> str:
+        return self.get_container_host_ip()
+
+    def get_ydb_port(self) -> str:
+        return self.get_exposed_port(self.port_to_expose)
+
+    @wait_container_is_ready(ydb.ConnectionError)
+    def _connect(self):
+        with ydb.Driver(
+            connection_string=self.get_connection_string()
+        ) as driver:
+            driver.wait(fail_fast=True)
             try:
-                with pool.checkout() as session:
-                    session.execute_scheme(
-                        "create table `.sys_health/test_table` "
-                        "(A int32, primary key(A));"
-                    )
+                driver.scheme_client.describe_path("/local/.sys_health/test")
+            except ydb.SchemeError as e:
+                msg = "Database is not ready"
+                raise ydb.ConnectionError(msg) from e
 
-                return True
+    def _configure(self):
+        self.with_bind_ports(self.port_to_expose, self.port_to_expose)
+        if self._name:
+            self.with_name(self._name)
+        self.with_env("YDB_USE_IN_MEMORY_PDISKS", "true")
+        self.with_env("YDB_DEFAULT_LOG_LEVEL", "DEBUG")
+        self.with_env("GRPC_PORT", self.port_to_expose)
+        self.with_env("GRPC_TLS_PORT", self.port_to_expose)
 
-            except ydb.Error:
-                time.sleep(1)
+    def _maybe_stop_old_container(self):
+        if not self._name:
+            return
+        docker_client = self.get_docker_client()
+        running_container = docker_client.client.api.containers(
+            filters={"name": self._name}
+        )
+        if running_container:
+            logger.info("Stop existing container")
+            docker_client.client.api.remove_container(
+                running_container[0], force=True, v=True
+            )
 
-    raise RuntimeError("Container is not ready after timeout.")
+
+@pytest.fixture(scope="session")
+def ydb_container(
+    unused_tcp_port_factory: Callable[[], int],
+) -> Generator[YDBContainer, None, None]:
+    with YDBContainer(port=str(unused_tcp_port_factory())) as ydb_container:
+        yield ydb_container
 
 
-@pytest.fixture(scope="module")
-def endpoint(pytestconfig, module_scoped_container_getter):
-    with ydb.Driver(endpoint="localhost:2136", database="/local") as driver:
-        wait_container_ready(driver)
-    yield "localhost:2136"
+@pytest.fixture
+def connection_string(ydb_container: YDBContainer) -> str:
+    return ydb_container.get_connection_string()
 
 
-@pytest.fixture(scope="module")
-def database():
-    return "/local"
+@pytest.fixture
+def connection_kwargs(ydb_container: YDBContainer) -> dict:
+    return {
+        "host": ydb_container.get_ydb_host(),
+        "port": ydb_container.get_ydb_port(),
+        "database": ydb_container.get_ydb_database_name(),
+    }
 
 
 @pytest.fixture()
-async def driver(endpoint, database, event_loop):
-    driver_config = ydb.DriverConfig(
-        endpoint,
-        database,
+async def driver(ydb_container, event_loop):
+    driver = ydb.aio.Driver(
+        connection_string=ydb_container.get_connection_string()
     )
-
-    driver = ydb.aio.Driver(driver_config=driver_config)
-    await driver.wait(timeout=15)
+    await driver.wait(timeout=15, fail_fast=True)
 
     yield driver
 
