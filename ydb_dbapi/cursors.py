@@ -31,7 +31,7 @@ def _get_column_type(type_obj: Any) -> str:
     return str(ydb.convert.type_to_native(type_obj))
 
 
-class BaseCursor:
+class BufferedCursor:
     arraysize: int = 1
     _rows: Iterator | None = None
     _rows_count: int = -1
@@ -64,10 +64,26 @@ class BaseCursor:
         except ydb.Error as e:
             raise DatabaseError(e.message, original_error=e) from e
 
-    def _update_result_set(self, result_set: ydb.convert.ResultSet) -> None:
+    def _update_result_set(
+        self,
+        result_set: ydb.convert.ResultSet,
+        replace_current: bool = True,
+    ) -> None:
         self._update_description(result_set)
-        self._rows = self._rows_iterable(result_set)
-        self._rows_count = len(result_set.rows) or -1
+
+        new_rows_iter = self._rows_iterable(result_set)
+        new_rows_count = len(result_set.rows) or -1
+
+        if self._rows is None or replace_current:
+            self._rows = new_rows_iter
+            self._rows_count = new_rows_count
+        else:
+            self._rows = itertools.chain(self._rows, new_rows_iter)
+            if new_rows_count != -1:
+                if self._rows_count != -1:
+                    self._rows_count += new_rows_count
+                else:
+                    self._rows_count = new_rows_count
 
     def _update_description(self, result_set: ydb.convert.ResultSet) -> None:
         self._description = [
@@ -104,70 +120,44 @@ class BaseCursor:
         self._state = CursorStatus.running
 
     def _fetchone_from_buffer(self) -> tuple | None:
+        self._raise_if_closed()
         return next(self._rows or iter([]), None)
 
     def _fetchmany_from_buffer(self, size: int | None = None) -> list:
+        self._raise_if_closed()
         return list(
             itertools.islice(self._rows or iter([]), size or self.arraysize)
         )
 
     def _fetchall_from_buffer(self) -> list:
+        self._raise_if_closed()
         return list(self._rows or iter([]))
 
 
-class Cursor(BaseCursor):
+class Cursor(BufferedCursor):
     def __init__(
         self,
         session: ydb.QuerySession,
         tx_context: ydb.QueryTxContext | None = None,
         table_path_prefix: str = "",
         autocommit: bool = True,
-        auto_scroll_result_sets: bool = False,
     ) -> None:
         self._session = session
         self._tx_context = tx_context
         self._table_path_prefix = table_path_prefix
         self._autocommit = autocommit
-        self._auto_scroll = auto_scroll_result_sets
 
         self._stream: Iterator | None = None
 
     def fetchone(self) -> tuple | None:
-        row = self._fetchone_from_buffer()
-        if not self._auto_scroll:
-            return row
-
-        if row is None:
-            while self.nextset():
-                # We should skip empty result sets
-                row = self._fetchone_from_buffer()
-                if row is not None:
-                    return row
-
-        return row
+        return self._fetchone_from_buffer()
 
     def fetchmany(self, size: int | None = None) -> list:
         size = size or self.arraysize
-        rows = self._fetchmany_from_buffer(size)
-        if not self._auto_scroll:
-            return rows
-
-        while len(rows) < size and self.nextset():
-            new_rows = self._fetchmany_from_buffer(size - len(rows))
-            rows.extend(new_rows)
-
-        return rows
+        return self._fetchmany_from_buffer(size)
 
     def fetchall(self) -> list:
-        rows = self._fetchall_from_buffer()
-        if not self._auto_scroll:
-            return rows
-
-        while self.nextset():
-            new_rows = self._fetchall_from_buffer()
-            rows.extend(new_rows)
-
-        return rows
+        return self._fetchall_from_buffer()
 
     @handle_ydb_errors
     def _execute_generic_query(
@@ -193,7 +183,6 @@ class Cursor(BaseCursor):
         self,
         query: str,
         parameters: ParametersType | None = None,
-        prefetch_first_set: bool = True,
     ) -> None:
         self._raise_if_closed()
         self._raise_if_running()
@@ -211,19 +200,18 @@ class Cursor(BaseCursor):
 
         self._begin_query()
 
-        if prefetch_first_set:
-            self.nextset()
+        self._scroll_stream(replace_current=False)
 
     async def executemany(self) -> None:
         pass
 
     @handle_ydb_errors
-    def nextset(self) -> bool:
+    def nextset(self, replace_current: bool = True) -> bool:
         if self._stream is None:
             return False
         try:
             result_set = self._stream.__next__()
-            self._update_result_set(result_set)
+            self._update_result_set(result_set, replace_current)
         except (StopIteration, StopAsyncIteration, RuntimeError):
             self._state = CursorStatus.finished
             return False
@@ -232,12 +220,12 @@ class Cursor(BaseCursor):
             raise
         return True
 
-    def finish_query(self) -> None:
+    def _scroll_stream(self, replace_current: bool = True) -> None:
         self._raise_if_closed()
 
         next_set_available = True
         while next_set_available:
-            next_set_available = self.nextset()
+            next_set_available = self.nextset(replace_current)
 
         self._state = CursorStatus.finished
 
@@ -245,7 +233,7 @@ class Cursor(BaseCursor):
         if self._state == CursorStatus.closed:
             return
 
-        self.finish_query()
+        self._scroll_stream()
         self._state = CursorStatus.closed
 
     def __enter__(self) -> Self:
@@ -260,58 +248,30 @@ class Cursor(BaseCursor):
         self.close()
 
 
-class AsyncCursor(BaseCursor):
+class AsyncCursor(BufferedCursor):
     def __init__(
         self,
         session: ydb.aio.QuerySession,
         tx_context: ydb.aio.QueryTxContext | None = None,
         table_path_prefix: str = "",
         autocommit: bool = True,
-        auto_scroll_result_sets: bool = False,
     ) -> None:
         self._session = session
         self._tx_context = tx_context
         self._table_path_prefix = table_path_prefix
         self._autocommit = autocommit
-        self._auto_scroll = auto_scroll_result_sets
 
         self._stream: AsyncIterator | None = None
 
     async def fetchone(self) -> tuple | None:
-        row = self._fetchone_from_buffer()
-        if not self._auto_scroll:
-            return row
-
-        if row is None:
-            while await self.nextset():
-                row = self._fetchone_from_buffer()
-                if row is not None:
-                    return row
-
-        return row
+        return self._fetchone_from_buffer()
 
     async def fetchmany(self, size: int | None = None) -> list:
         size = size or self.arraysize
-        rows = self._fetchmany_from_buffer(size)
-        if not self._auto_scroll:
-            return rows
-
-        while len(rows) < size and await self.nextset():
-            new_rows = self._fetchmany_from_buffer(size - len(rows))
-            rows.extend(new_rows)
-
-        return rows
+        return self._fetchmany_from_buffer(size)
 
     async def fetchall(self) -> list:
-        rows = self._fetchall_from_buffer()
-        if not self._auto_scroll:
-            return rows
-
-        while await self.nextset():
-            new_rows = self._fetchall_from_buffer()
-            rows.extend(new_rows)
-
-        return rows
+        return self._fetchall_from_buffer()
 
     @handle_ydb_errors
     async def _execute_generic_query(
@@ -337,7 +297,6 @@ class AsyncCursor(BaseCursor):
         self,
         query: str,
         parameters: ParametersType | None = None,
-        prefetch_first_set: bool = True,
     ) -> None:
         self._raise_if_closed()
         self._raise_if_running()
@@ -355,19 +314,18 @@ class AsyncCursor(BaseCursor):
 
         self._begin_query()
 
-        if prefetch_first_set:
-            await self.nextset()
+        await self._scroll_stream(replace_current=False)
 
     async def executemany(self) -> None:
         pass
 
     @handle_ydb_errors
-    async def nextset(self) -> bool:
+    async def nextset(self, replace_current: bool = True) -> bool:
         if self._stream is None:
             return False
         try:
             result_set = await self._stream.__anext__()
-            self._update_result_set(result_set)
+            self._update_result_set(result_set, replace_current)
         except (StopIteration, StopAsyncIteration, RuntimeError):
             self._stream = None
             self._state = CursorStatus.finished
@@ -377,12 +335,12 @@ class AsyncCursor(BaseCursor):
             raise
         return True
 
-    async def finish_query(self) -> None:
+    async def _scroll_stream(self, replace_current: bool = True) -> None:
         self._raise_if_closed()
 
         next_set_available = True
         while next_set_available:
-            next_set_available = await self.nextset()
+            next_set_available = await self.nextset(replace_current)
 
         self._state = CursorStatus.finished
 
@@ -390,7 +348,7 @@ class AsyncCursor(BaseCursor):
         if self._state == CursorStatus.closed:
             return
 
-        await self.finish_query()
+        await self._scroll_stream()
         self._state = CursorStatus.closed
 
     async def __aenter__(self) -> Self:

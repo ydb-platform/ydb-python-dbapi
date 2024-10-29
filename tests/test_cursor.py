@@ -119,47 +119,18 @@ class TestAsyncCursor:
             assert await cursor.fetchall() == []
 
     @pytest.mark.asyncio
-    async def test_cursor_next_set(
+    async def test_cursor_fetch_one_multiple_result_sets(
         self, session: ydb.aio.QuerySession
     ) -> None:
         async with ydb_dbapi.AsyncCursor(session=session) as cursor:
-            yql_text = """SELECT 1 as val; SELECT 2 as val;"""
-            await cursor.execute(query=yql_text)
-
-            res = await cursor.fetchall()
-            assert res is not None
-            assert len(res) == 1
-            assert res[0][0] == 1
-
-            nextset = await cursor.nextset()
-            assert nextset
-
-            res = await cursor.fetchall()
-            assert res is not None
-            assert len(res) == 1
-            assert res[0][0] == 2
-
-            nextset = await cursor.nextset()
-            assert nextset
-
-            assert await cursor.fetchall() == []
-
-            nextset = await cursor.nextset()
-            assert not nextset
-
-    @pytest.mark.asyncio
-    async def test_cursor_fetch_one_autoscroll(
-        self, session: ydb.aio.QuerySession
-    ) -> None:
-        async with ydb_dbapi.AsyncCursor(
-            session=session, auto_scroll_result_sets=True
-        ) as cursor:
             yql_text = """
             SELECT id, val FROM table;
             SELECT id, val FROM table1;
             SELECT id, val FROM table2;
             """
             await cursor.execute(query=yql_text)
+
+            assert cursor.rowcount == 12
 
             for i in range(RESULT_SET_LENGTH * RESULT_SET_COUNT):
                 res = await cursor.fetchone()
@@ -170,18 +141,18 @@ class TestAsyncCursor:
             assert not await cursor.nextset()
 
     @pytest.mark.asyncio
-    async def test_cursor_fetch_many_autoscroll(
+    async def test_cursor_fetch_many_multiple_result_sets(
         self, session: ydb.aio.QuerySession
     ) -> None:
-        async with ydb_dbapi.AsyncCursor(
-            session=session, auto_scroll_result_sets=True
-        ) as cursor:
+        async with ydb_dbapi.AsyncCursor(session=session) as cursor:
             yql_text = """
             SELECT id, val FROM table;
             SELECT id, val FROM table1;
             SELECT id, val FROM table2;
             """
             await cursor.execute(query=yql_text)
+
+            assert cursor.rowcount == 12
 
             halfsize = (RESULT_SET_LENGTH * RESULT_SET_COUNT) // 2
             for _ in range(2):
@@ -193,18 +164,18 @@ class TestAsyncCursor:
             assert not await cursor.nextset()
 
     @pytest.mark.asyncio
-    async def test_cursor_fetch_all_autoscroll(
+    async def test_cursor_fetch_all_multiple_result_sets(
         self, session: ydb.aio.QuerySession
     ) -> None:
-        async with ydb_dbapi.AsyncCursor(
-            session=session, auto_scroll_result_sets=True
-        ) as cursor:
+        async with ydb_dbapi.AsyncCursor(session=session) as cursor:
             yql_text = """
             SELECT id, val FROM table;
             SELECT id, val FROM table1;
             SELECT id, val FROM table2;
             """
             await cursor.execute(query=yql_text)
+
+            assert cursor.rowcount == 12
 
             res = await cursor.fetchall()
 
@@ -274,44 +245,18 @@ class TestCursor:
 
             assert cursor.fetchall() == []
 
-    def test_cursor_next_set(self, session_sync: ydb.QuerySession) -> None:
-        with ydb_dbapi.Cursor(session=session_sync) as cursor:
-            yql_text = """SELECT 1 as val; SELECT 2 as val;"""
-            cursor.execute(query=yql_text)
-
-            res = cursor.fetchall()
-            assert res is not None
-            assert len(res) == 1
-            assert res[0][0] == 1
-
-            nextset = cursor.nextset()
-            assert nextset
-
-            res = cursor.fetchall()
-            assert res is not None
-            assert len(res) == 1
-            assert res[0][0] == 2
-
-            nextset = cursor.nextset()
-            assert nextset
-
-            assert cursor.fetchall() == []
-
-            nextset = cursor.nextset()
-            assert not nextset
-
-    def test_cursor_fetch_one_autoscroll(
+    def test_cursor_fetch_one_multiple_result_sets(
         self, session_sync: ydb.QuerySession
     ) -> None:
-        with ydb_dbapi.Cursor(
-            session=session_sync, auto_scroll_result_sets=True
-        ) as cursor:
+        with ydb_dbapi.Cursor(session=session_sync) as cursor:
             yql_text = """
             SELECT id, val FROM table;
             SELECT id, val FROM table1;
             SELECT id, val FROM table2;
             """
             cursor.execute(query=yql_text)
+
+            assert cursor.rowcount == 12
 
             for i in range(RESULT_SET_LENGTH * RESULT_SET_COUNT):
                 res = cursor.fetchone()
@@ -321,18 +266,18 @@ class TestCursor:
             assert cursor.fetchone() is None
             assert not cursor.nextset()
 
-    def test_cursor_fetch_many_autoscroll(
+    def test_cursor_fetch_many_multiple_result_sets(
         self, session_sync: ydb.QuerySession
     ) -> None:
-        with ydb_dbapi.Cursor(
-            session=session_sync, auto_scroll_result_sets=True
-        ) as cursor:
+        with ydb_dbapi.Cursor(session=session_sync) as cursor:
             yql_text = """
             SELECT id, val FROM table;
             SELECT id, val FROM table1;
             SELECT id, val FROM table2;
             """
             cursor.execute(query=yql_text)
+
+            assert cursor.rowcount == 12
 
             halfsize = (RESULT_SET_LENGTH * RESULT_SET_COUNT) // 2
             for _ in range(2):
@@ -343,18 +288,18 @@ class TestCursor:
             assert cursor.fetchmany(2) == []
             assert not cursor.nextset()
 
-    def test_cursor_fetch_all_autoscroll(
+    def test_cursor_fetch_all_multiple_result_sets(
         self, session_sync: ydb.QuerySession
     ) -> None:
-        with ydb_dbapi.Cursor(
-            session=session_sync, auto_scroll_result_sets=True
-        ) as cursor:
+        with ydb_dbapi.Cursor(session=session_sync) as cursor:
             yql_text = """
             SELECT id, val FROM table;
             SELECT id, val FROM table1;
             SELECT id, val FROM table2;
             """
             cursor.execute(query=yql_text)
+
+            assert cursor.rowcount == 12
 
             res = cursor.fetchall()
 

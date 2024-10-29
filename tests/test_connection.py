@@ -34,7 +34,7 @@ class BaseSyncDBApiTestSuit:
             if read_only:
                 with pytest.raises(dbapi.DatabaseError):
                     cursor.execute(query)
-                    cursor.finish_query()
+                    cursor._scroll_stream()
 
             else:
                 cursor.execute(query)
@@ -53,14 +53,14 @@ class BaseSyncDBApiTestSuit:
         cur = connection.cursor()
         with suppress(dbapi.DatabaseError):
             cur.execute("DROP TABLE foo")
-            cur.finish_query()
+            cur._scroll_stream()
 
         assert not connection.check_exists("/local/foo")
         with pytest.raises(dbapi.ProgrammingError):
             connection.describe("/local/foo")
 
         cur.execute("CREATE TABLE foo(id Int64 NOT NULL, PRIMARY KEY (id))")
-        cur.finish_query()
+        cur._scroll_stream()
 
         assert connection.check_exists("/local/foo")
 
@@ -77,12 +77,12 @@ class BaseSyncDBApiTestSuit:
 
         with suppress(dbapi.DatabaseError):
             cur.execute("DROP TABLE test")
-            cur.finish_query()
+            cur._scroll_stream()
 
         cur.execute(
             "CREATE TABLE test(id Int64 NOT NULL, text Utf8, PRIMARY KEY (id))"
         )
-        cur.finish_query()
+        cur._scroll_stream()
 
         cur.execute(
             """
@@ -104,7 +104,7 @@ class BaseSyncDBApiTestSuit:
                 )
             },
         )
-        cur.finish_query()
+        cur._scroll_stream()
 
         cur.execute("DROP TABLE test")
 
@@ -121,7 +121,7 @@ class BaseSyncDBApiTestSuit:
 
         with suppress(dbapi.DatabaseError):
             cur.execute("DROP TABLE test")
-            cur.finish_query()
+            cur._scroll_stream()
 
         with pytest.raises(dbapi.DataError):
             cur.execute("SELECT 18446744073709551616")
@@ -136,10 +136,10 @@ class BaseSyncDBApiTestSuit:
             cur.execute("SELECT * FROM test")
 
         cur.execute("CREATE TABLE test(id Int64, PRIMARY KEY (id))")
-        cur.finish_query()
+        cur._scroll_stream()
 
         cur.execute("INSERT INTO test(id) VALUES(1)")
-        cur.finish_query()
+        cur._scroll_stream()
 
         with pytest.raises(dbapi.IntegrityError):
             cur.execute("INSERT INTO test(id) VALUES(1)")
@@ -214,7 +214,7 @@ class BaseAsyncDBApiTestSuit:
             if read_only:
                 with pytest.raises(dbapi.DatabaseError):
                     await cursor.execute(query)
-                    await cursor.finish_query()
+                    await cursor._scroll_stream()
 
             else:
                 await cursor.execute(query)
@@ -235,7 +235,7 @@ class BaseAsyncDBApiTestSuit:
         cur = connection.cursor()
         with suppress(dbapi.DatabaseError):
             await cur.execute("DROP TABLE foo")
-            await cur.finish_query()
+            await cur._scroll_stream()
 
         assert not await connection.check_exists("/local/foo")
         with pytest.raises(dbapi.ProgrammingError):
@@ -244,7 +244,7 @@ class BaseAsyncDBApiTestSuit:
         await cur.execute(
             "CREATE TABLE foo(id Int64 NOT NULL, PRIMARY KEY (id))"
         )
-        await cur.finish_query()
+        await cur._scroll_stream()
 
         assert await connection.check_exists("/local/foo")
 
@@ -263,12 +263,12 @@ class BaseAsyncDBApiTestSuit:
 
         with suppress(dbapi.DatabaseError):
             await cur.execute("DROP TABLE test")
-            await cur.finish_query()
+            await cur._scroll_stream()
 
         await cur.execute(
             "CREATE TABLE test(id Int64 NOT NULL, text Utf8, PRIMARY KEY (id))"
         )
-        await cur.finish_query()
+        await cur._scroll_stream()
 
         await cur.execute(
             """
@@ -290,7 +290,7 @@ class BaseAsyncDBApiTestSuit:
                 )
             },
         )
-        await cur.finish_query()
+        await cur._scroll_stream()
 
         await cur.execute("DROP TABLE test")
 
@@ -307,7 +307,7 @@ class BaseAsyncDBApiTestSuit:
 
         with suppress(dbapi.DatabaseError):
             await cur.execute("DROP TABLE test")
-            await cur.finish_query()
+            await cur._scroll_stream()
 
         with pytest.raises(dbapi.DataError):
             await cur.execute("SELECT 18446744073709551616")
@@ -322,10 +322,10 @@ class BaseAsyncDBApiTestSuit:
             await cur.execute("SELECT * FROM test")
 
         await cur.execute("CREATE TABLE test(id Int64, PRIMARY KEY (id))")
-        await cur.finish_query()
+        await cur._scroll_stream()
 
         await cur.execute("INSERT INTO test(id) VALUES(1)")
-        await cur.finish_query()
+        await cur._scroll_stream()
 
         with pytest.raises(dbapi.IntegrityError):
             await cur.execute("INSERT INTO test(id) VALUES(1)")
