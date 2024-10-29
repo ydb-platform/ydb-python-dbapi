@@ -1,25 +1,17 @@
-from typing import (
-    Any,
-    List,
-    NamedTuple,
-    Optional,
-)
+from __future__ import annotations
+
 import posixpath
+from typing import Any
+from typing import NamedTuple
 
 import ydb
 from ydb.retries import retry_operation_async
 
 from .cursors import Cursor
-
-from .utils import (
-    handle_ydb_errors,
-)
-
-from .errors import (
-    InterfaceError,
-    InternalError,
-    NotSupportedError,
-)
+from .errors import InterfaceError
+from .errors import InternalError
+from .errors import NotSupportedError
+from .utils import handle_ydb_errors
 
 
 class IsolationLevel:
@@ -31,14 +23,21 @@ class IsolationLevel:
     AUTOCOMMIT = "AUTOCOMMIT"
 
 
-class Connection:
+_DRIVER_TYPE: ydb.Driver | ydb.aio.Driver
+_SESSION_POOL_TYPE: ydb.QuerySessionPool | ydb.aio.QuerySessionPool
+
+
+class BaseYDBConnection:
+    _ydb_driver_class = ydb.Driver
+    _ydb_session_pool_class = ydb.QuerySessionPool
+
     def __init__(
         self,
         host: str = "",
         port: str = "",
         database: str = "",
         **conn_kwargs: Any,
-    ):
+    ) -> None:
         self.endpoint = f"grpc://{host}:{port}"
         self.database = database
         self.conn_kwargs = conn_kwargs
@@ -51,7 +50,7 @@ class Connection:
             "ydb_session_pool" in self.conn_kwargs
         ):  # Use session pool managed manually
             self._shared_session_pool = True
-            self._session_pool: ydb.aio.SessionPool = self.conn_kwargs.pop(
+            self._session_pool = self.conn_kwargs.pop(
                 "ydb_session_pool"
             )
             self._driver = self._session_pool._driver
@@ -62,70 +61,18 @@ class Connection:
                 database=self.database,
                 credentials=self.credentials,
             )
-            self._driver = ydb.aio.Driver(driver_config)
-            self._session_pool = ydb.aio.QuerySessionPool(self._driver, size=5)
+            self._driver = self._ydb_driver_class(driver_config)
+            self._session_pool = self._ydb_session_pool_class(
+                self._driver, size=5
+            )
 
-        self._tx_context: Optional[ydb.QueryTxContext] = None
+        self._tx_context: ydb.QueryTxContext | None = None
         self._tx_mode: ydb.BaseQueryTxMode = ydb.QuerySerializableReadWrite()
 
-        self._current_cursor: Optional[Cursor] = None
+        self._current_cursor: Cursor | None = None
         self.interactive_transaction: bool = False
 
-    async def _wait(self, timeout: int = 5):
-        try:
-            await self._driver.wait(timeout, fail_fast=True)
-        except ydb.Error as e:
-            raise InterfaceError(e.message, original_error=e) from e
-        except Exception as e:
-            await self._driver.stop()
-            raise InterfaceError(
-                "Failed to connect to YDB, details "
-                f"{self._driver.discovery_debug_details()}"
-            ) from e
-
-    def cursor(self):
-        if self._current_cursor and not self._current_cursor._closed:
-            raise RuntimeError(
-                "Unable to create new Cursor before closing existing one."
-            )
-        self._current_cursor = Cursor(
-            session_pool=self._session_pool,
-            tx_context=self._tx_context,
-            autocommit=(not self.interactive_transaction),
-        )
-        return self._current_cursor
-
-    async def begin(self):
-        self._tx_context = None
-        self._session = await self._session_pool.acquire()
-        self._tx_context = self._session.transaction(self._tx_mode)
-        # await self._tx_context.begin()
-
-    async def commit(self):
-        if self._tx_context and self._tx_context.tx_id:
-            await self._tx_context.commit()
-            await self._session_pool.release(self._session)
-            self._session = None
-            self._tx_context = None
-
-    async def rollback(self):
-        if self._tx_context and self._tx_context.tx_id:
-            await self._tx_context.rollback()
-            await self._session_pool.release(self._session)
-            self._session = None
-            self._tx_context = None
-
-    async def close(self):
-        await self.rollback()
-
-        if self._current_cursor:
-            await self._current_cursor.close()
-
-        if not self._shared_session_pool:
-            await self._session_pool.stop()
-            await self._driver.stop()
-
-    def set_isolation_level(self, isolation_level: str):
+    def set_isolation_level(self, isolation_level: str) -> None:
         class IsolationSettings(NamedTuple):
             ydb_mode: ydb.BaseQueryTxMode
             interactive: bool
@@ -138,14 +85,14 @@ class Connection:
                 ydb.QuerySerializableReadWrite(), interactive=True
             ),
             IsolationLevel.ONLINE_READONLY: IsolationSettings(
-                ydb.QueryOnlineReadOnly(), interactive=False
+                ydb.QueryOnlineReadOnly(), interactive=True
             ),
             IsolationLevel.ONLINE_READONLY_INCONSISTENT: IsolationSettings(
                 ydb.QueryOnlineReadOnly().with_allow_inconsistent_reads(),
-                interactive=False,
+                interactive=True,
             ),
             IsolationLevel.STALE_READONLY: IsolationSettings(
-                ydb.QueryStaleReadOnly(), interactive=False
+                ydb.QueryStaleReadOnly(), interactive=True
             ),
             IsolationLevel.SNAPSHOT_READONLY: IsolationSettings(
                 ydb.QuerySnapshotReadOnly(), interactive=True
@@ -160,22 +107,89 @@ class Connection:
         self.interactive_transaction = ydb_isolation_settings.interactive
 
     def get_isolation_level(self) -> str:
-        if self._tx_mode.name == ydb.SerializableReadWrite().name:
+        if self._tx_mode.name == ydb.QuerySerializableReadWrite().name:
             if self.interactive_transaction:
                 return IsolationLevel.SERIALIZABLE
-            else:
-                return IsolationLevel.AUTOCOMMIT
-        elif self._tx_mode.name == ydb.OnlineReadOnly().name:
+            return IsolationLevel.AUTOCOMMIT
+        if self._tx_mode.name == ydb.QueryOnlineReadOnly().name:
             if self._tx_mode.settings.allow_inconsistent_reads:
                 return IsolationLevel.ONLINE_READONLY_INCONSISTENT
-            else:
-                return IsolationLevel.ONLINE_READONLY
-        elif self._tx_mode.name == ydb.StaleReadOnly().name:
+            return IsolationLevel.ONLINE_READONLY
+        if self._tx_mode.name == ydb.QueryStaleReadOnly().name:
             return IsolationLevel.STALE_READONLY
-        elif self._tx_mode.name == ydb.SnapshotReadOnly().name:
+        if self._tx_mode.name == ydb.QuerySnapshotReadOnly().name:
             return IsolationLevel.SNAPSHOT_READONLY
+        msg = f"{self._tx_mode.name} is not supported"
+        raise NotSupportedError(msg)
+
+
+class Connection(BaseYDBConnection):
+    _ydb_driver_class = ydb.aio.Driver
+    _ydb_session_pool_class = ydb.aio.QuerySessionPool
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
+        self._session: ydb.aio.QuerySession | None = None
+        self._tx_context: ydb.QueryTxContext | None = None
+
+    async def _wait(self, timeout: int = 5) -> None:
+        try:
+            await self._driver.wait(timeout, fail_fast=True)
+        except ydb.Error as e:
+            raise InterfaceError(e.message, original_error=e) from e
+        except Exception as e:
+            await self._driver.stop()
+            msg = (
+                "Failed to connect to YDB, details "
+                f"{self._driver.discovery_debug_details()}"
+            )
+            raise InterfaceError(
+                msg
+            ) from e
+
+        self._session = await self._session_pool.acquire()
+
+    def cursor(self):
+        if self._current_cursor and not self._current_cursor._closed:
+            raise RuntimeError(
+                "Unable to create new Cursor before closing existing one."
+            )
+
+        if self.interactive_transaction:
+            self._tx_context = self._session.transaction(self._tx_mode)
         else:
-            raise NotSupportedError(f"{self._tx_mode.name} is not supported")
+            self._tx_context = None
+
+        self._current_cursor = Cursor(
+            session=self._session,
+            tx_context=self._tx_context,
+            autocommit=(not self.interactive_transaction),
+        )
+        return self._current_cursor
+
+    async def commit(self) -> None:
+        if self._tx_context and self._tx_context.tx_id:
+            await self._tx_context.commit()
+            self._tx_context = None
+
+    async def rollback(self) -> None:
+        if self._tx_context and self._tx_context.tx_id:
+            await self._tx_context.rollback()
+            self._tx_context = None
+
+    async def close(self) -> None:
+        await self.rollback()
+
+        if self._current_cursor:
+            await self._current_cursor.close()
+
+        if self._session:
+            await self._session_pool.release(self._session)
+
+        if not self._shared_session_pool:
+            await self._session_pool.stop()
+            await self._driver.stop()
 
     @handle_ydb_errors
     async def describe(self, table_path: str) -> ydb.TableSchemeEntry:
@@ -192,7 +206,7 @@ class Connection:
         return await self._check_path_exists(abs_table_path)
 
     @handle_ydb_errors
-    async def get_table_names(self) -> List[str]:
+    async def get_table_names(self) -> list[str]:
         abs_dir_path = posixpath.join(self.database, self.table_path_prefix)
         names = await self._get_table_names(abs_dir_path)
         return [posixpath.relpath(path, abs_dir_path) for path in names]
@@ -200,7 +214,7 @@ class Connection:
     async def _check_path_exists(self, table_path: str) -> bool:
         try:
 
-            async def callee():
+            async def callee() -> None:
                 await self._driver.scheme_client.describe_path(table_path)
 
             await retry_operation_async(callee)
@@ -208,7 +222,7 @@ class Connection:
         except ydb.SchemeError:
             return False
 
-    async def _get_table_names(self, abs_dir_path: str) -> List[str]:
+    async def _get_table_names(self, abs_dir_path: str) -> list[str]:
         async def callee():
             return await self._driver.scheme_client.list_directory(
                 abs_dir_path

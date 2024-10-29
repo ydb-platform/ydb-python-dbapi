@@ -1,17 +1,15 @@
-from enum import Enum
 import functools
-from typing import Iterator
+from enum import Enum
+
 import ydb
 
-from .errors import (
-    DatabaseError,
-    DataError,
-    IntegrityError,
-    InternalError,
-    NotSupportedError,
-    OperationalError,
-    ProgrammingError,
-)
+from .errors import DatabaseError
+from .errors import DataError
+from .errors import IntegrityError
+from .errors import InternalError
+from .errors import NotSupportedError
+from .errors import OperationalError
+from .errors import ProgrammingError
 
 
 def handle_ydb_errors(func):
@@ -56,14 +54,3 @@ class CursorStatus(str, Enum):
     running = "running"
     finished = "finished"
     closed = "closed"
-
-
-class AsyncFromSyncIterator:
-    def __init__(self, sync_iter: Iterator):
-        self._sync_iter = sync_iter
-
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self):
-        return next(self._sync_iter)

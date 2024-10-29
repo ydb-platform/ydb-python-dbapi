@@ -1,25 +1,25 @@
+from __future__ import annotations
+
 import itertools
-from typing import (
-    Any,
-    AsyncIterator,
-    Dict,
-    Iterator,
-    List,
-    Optional,
-    Tuple,
-    Union,
-)
+from collections.abc import AsyncIterator
+from collections.abc import Iterator
+from typing import Any
+from typing import Union
 
 import ydb
-from .errors import Error, DatabaseError, InterfaceError, ProgrammingError
-from .utils import handle_ydb_errors, AsyncFromSyncIterator, CursorStatus
 
+from .errors import DatabaseError
+from .errors import Error
+from .errors import InterfaceError
+from .errors import ProgrammingError
+from .utils import CursorStatus
+from .utils import handle_ydb_errors
 
-ParametersType = Dict[
+ParametersType = dict[
     str,
     Union[
         Any,
-        Tuple[Any, Union[ydb.PrimitiveType, ydb.AbstractTypeBuilder]],
+        tuple[Any, Union[ydb.PrimitiveType, ydb.AbstractTypeBuilder]],
         ydb.TypedValue,
     ],
 ]
@@ -32,21 +32,21 @@ def _get_column_type(type_obj: Any) -> str:
 class Cursor:
     def __init__(
         self,
-        session_pool: ydb.aio.QuerySessionPool,
-        tx_context: Optional[ydb.aio.QueryTxContext] = None,
+        session: ydb.aio.QuerySession,
+        tx_context: ydb.aio.QueryTxContext | None = None,
         table_path_prefix: str = "",
         autocommit: bool = True,
-    ):
+    ) -> None:
         self.arraysize: int = 1
-        self._description: Optional[List[Tuple]] = None
+        self._description: list[tuple] | None = None
 
-        self._session_pool = session_pool
+        self._session = session
         self._tx_context = tx_context
         self._table_path_prefix = table_path_prefix
         self._autocommit = autocommit
 
-        self._stream: Optional[AsyncIterator] = None
-        self._rows: Optional[Iterator[Dict]] = None
+        self._stream: AsyncIterator | None = None
+        self._rows: Iterator[tuple] | None = None
         self._rows_count: int = -1
 
         self._closed: bool = False
@@ -62,16 +62,16 @@ class Cursor:
 
     @handle_ydb_errors
     async def _execute_generic_query(
-        self, query: str, parameters: Optional[ParametersType] = None
-    ) -> List[ydb.convert.ResultSet]:
-        return await self._session_pool.execute_with_retries(
+        self, query: str, parameters: ParametersType | None = None
+    ) -> AsyncIterator[ydb.convert.ResultSet]:
+        return await self._session.execute(
             query=query, parameters=parameters
         )
 
     @handle_ydb_errors
     async def _execute_transactional_query(
-        self, query: str, parameters: Optional[ParametersType] = None
-    ) -> AsyncIterator:
+        self, query: str, parameters: ParametersType | None = None
+    ) -> AsyncIterator[ydb.convert.ResultSet]:
         if self._tx_context is None:
             raise Error(
                 "Unable to execute tx based queries without transaction."
@@ -85,9 +85,9 @@ class Cursor:
     async def execute(
         self,
         query: str,
-        parameters: Optional[ParametersType] = None,
+        parameters: ParametersType | None = None,
         prefetch_first_set: bool = True,
-    ):
+    ) -> None:
         self._check_cursor_closed()
         self._check_pending_query()
         if self._tx_context is not None:
@@ -95,10 +95,9 @@ class Cursor:
                 query=query, parameters=parameters
             )
         else:
-            result_sets = await self._execute_generic_query(
+            self._stream = await self._execute_generic_query(
                 query=query, parameters=parameters
             )
-            self._stream = AsyncFromSyncIterator(iter(result_sets))
 
         if self._stream is None:
             return
@@ -108,12 +107,12 @@ class Cursor:
         if prefetch_first_set:
             await self.nextset()
 
-    def _update_result_set(self, result_set: ydb.convert.ResultSet):
+    def _update_result_set(self, result_set: ydb.convert.ResultSet) -> None:
         self._update_description(result_set)
         self._rows = self._rows_iterable(result_set)
         self._rows_count = len(result_set.rows) or -1
 
-    def _update_description(self, result_set: ydb.convert.ResultSet):
+    def _update_description(self, result_set: ydb.convert.ResultSet) -> None:
         self._description = [
             (
                 col.name,
@@ -137,13 +136,13 @@ class Cursor:
         except ydb.Error as e:
             raise DatabaseError(e.message, original_error=e) from e
 
-    async def executemany(self):
+    async def executemany(self) -> None:
         pass
 
-    async def fetchone(self):
+    async def fetchone(self) -> tuple | None:
         return next(self._rows or iter([]), None)
 
-    async def fetchmany(self, size: Optional[int] = None):
+    async def fetchmany(self, size: int | None = None) -> list | None:
         return (
             list(
                 itertools.islice(
@@ -153,11 +152,11 @@ class Cursor:
             or None
         )
 
-    async def fetchall(self):
+    async def fetchall(self) -> list | None:
         return list(self._rows or iter([])) or None
 
     @handle_ydb_errors
-    async def nextset(self):
+    async def nextset(self) -> bool:
         if self._stream is None:
             return False
         try:
@@ -166,15 +165,15 @@ class Cursor:
         except (StopIteration, StopAsyncIteration, RuntimeError):
             self._state = CursorStatus.finished
             return False
-        except ydb.Error as e:
+        except ydb.Error:
             self._state = CursorStatus.finished
-            raise e
+            raise
         return True
 
-    async def finish_query(self):
+    async def finish_query(self) -> None:
         self._check_cursor_closed()
 
-        if not self._state == CursorStatus.running:
+        if self._state != CursorStatus.running:
             return
 
         next_set_available = True
@@ -183,13 +182,13 @@ class Cursor:
 
         self._state = CursorStatus.finished
 
-    def setinputsizes(self):
+    def setinputsizes(self) -> None:
         pass
 
-    def setoutputsize(self):
+    def setoutputsize(self) -> None:
         pass
 
-    async def close(self):
+    async def close(self) -> None:
         if self._closed:
             return
 
@@ -197,24 +196,24 @@ class Cursor:
         self._state = CursorStatus.closed
         self._closed = True
 
-    def _begin_query(self):
+    def _begin_query(self) -> None:
         self._state = CursorStatus.running
 
-    def _check_pending_query(self):
+    def _check_pending_query(self) -> None:
         if self._state == CursorStatus.running:
             raise ProgrammingError(
                 "Some records have not been fetched. "
                 "Fetch the remaining records before executing the next query."
             )
 
-    def _check_cursor_closed(self):
+    def _check_cursor_closed(self) -> None:
         if self._state == CursorStatus.closed:
             raise InterfaceError(
                 "Could not perform operation: Cursor is closed."
             )
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> Cursor:
         return self
 
-    async def __aexit__(self, exc_type, exc, tb):
+    async def __aexit__(self, exc_type, exc, tb) -> None:
         await self.close()
