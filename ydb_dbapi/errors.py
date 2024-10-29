@@ -4,6 +4,10 @@ import ydb
 from google.protobuf.message import Message
 
 
+class Warning(Exception):  # noqa: N818,A001
+    pass
+
+
 class Error(Exception):
     def __init__(
         self,
