@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+from collections.abc import AsyncGenerator
 from contextlib import suppress
 
 import pytest
@@ -37,7 +40,7 @@ class BaseDBApiTestSuit:
         await connection.rollback()
 
         async with connection.cursor() as cursor:
-            cursor.execute("DROP TABLE foo")
+            await cursor.execute("DROP TABLE foo")
 
     async def _test_connection(self, connection: dbapi.Connection) -> None:
         await connection.commit()
@@ -66,7 +69,9 @@ class BaseDBApiTestSuit:
         await cur.execute("DROP TABLE foo")
         await cur.close()
 
-    async def _test_cursor_raw_query(self, connection: dbapi.Connection) -> None:
+    async def _test_cursor_raw_query(
+        self, connection: dbapi.Connection
+    ) -> None:
         cur = connection.cursor()
         assert cur
 
@@ -107,7 +112,10 @@ class BaseDBApiTestSuit:
 
     async def _test_errors(self, connection: dbapi.Connection) -> None:
         with pytest.raises(dbapi.InterfaceError):
-            await dbapi.connect("localhost:2136", database="/local666")
+            await dbapi.connect(
+                "localhost:2136",  # type: ignore
+                database="/local666",  # type: ignore
+            )
 
         cur = connection.cursor()
 
@@ -142,8 +150,10 @@ class BaseDBApiTestSuit:
 
 class TestAsyncConnection(BaseDBApiTestSuit):
     @pytest_asyncio.fixture
-    async def connection(self, connection_kwargs):
-        conn = await dbapi.connect(**connection_kwargs)
+    async def connection(
+        self, connection_kwargs: dict
+    ) -> AsyncGenerator[dbapi.Connection]:
+        conn = await dbapi.connect(**connection_kwargs)  # ignore: typing
         try:
             yield conn
         finally:
@@ -166,19 +176,21 @@ class TestAsyncConnection(BaseDBApiTestSuit):
         isolation_level: str,
         read_only: bool,
         connection: dbapi.Connection,
-    ):
+    ) -> None:
         await self._test_isolation_level_read_only(
             connection, isolation_level, read_only
         )
 
     @pytest.mark.asyncio
-    async def test_connection(self, connection: dbapi.Connection):
+    async def test_connection(self, connection: dbapi.Connection) -> None:
         await self._test_connection(connection)
 
     @pytest.mark.asyncio
-    async def test_cursor_raw_query(self, connection: dbapi.Connection):
+    async def test_cursor_raw_query(
+        self, connection: dbapi.Connection
+    ) -> None:
         await self._test_cursor_raw_query(connection)
 
     @pytest.mark.asyncio
-    async def test_errors(self, connection: dbapi.Connection):
+    async def test_errors(self, connection: dbapi.Connection) -> None:
         await self._test_errors(connection)

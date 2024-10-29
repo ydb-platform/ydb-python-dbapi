@@ -58,6 +58,8 @@ ignore = [
     # Ignores below could be deleted
     "EM101", # Allow to use string literals in exceptions
     "TRY003", # Allow specifying long messages outside the exception class
+    "SLF001", # Allow access private member,
+    "PGH003", # Allow not to specify rule codes
 ]
 select = ["ALL"]
 
@@ -72,7 +74,8 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 force-single-line = true
 
 [tool.ruff.lint.per-file-ignores]
-"**/test_*.py" = ["S", "SLF", "ANN201", "ARG", "PLR2004"]
+"**/test_*.py" = ["S", "SLF", "ANN201", "ARG", "PLR2004", "PT012"]
+"conftest.py" = ["ARG001"]
 "__init__.py" = ["F401", "F403"]
 
 [tool.pytest.ini_options]

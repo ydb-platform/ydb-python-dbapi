@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from asyncio import AbstractEventLoop
+from collections.abc import AsyncGenerator
 from collections.abc import Generator
 from typing import Any
 from typing import Callable
@@ -9,6 +11,7 @@ import ydb
 from testcontainers.core.generic import DbContainer
 from testcontainers.core.generic import wait_container_is_ready
 from testcontainers.core.utils import setup_logger
+from typing_extensions import Self
 
 logger = setup_logger(__name__)
 
@@ -33,7 +36,7 @@ class YDBContainer(DbContainer):
         self._name = name
         self._database_name = "local"
 
-    def start(self):
+    def start(self) -> Self:
         self._maybe_stop_old_container()
         super().start()
         return self
@@ -115,7 +118,9 @@ def connection_kwargs(ydb_container: YDBContainer) -> dict:
 
 
 @pytest.fixture
-async def driver(ydb_container, event_loop):
+async def driver(
+    ydb_container: YDBContainer, event_loop: AbstractEventLoop
+) -> AsyncGenerator[ydb.aio.Driver]:
     driver = ydb.aio.Driver(
         connection_string=ydb_container.get_connection_string()
     )
@@ -128,7 +133,9 @@ async def driver(ydb_container, event_loop):
 
 
 @pytest.fixture
-async def session_pool(driver: ydb.aio.Driver):
+async def session_pool(
+    driver: ydb.aio.Driver,
+) -> AsyncGenerator[ydb.aio.QuerySessionPool]:
     session_pool = ydb.aio.QuerySessionPool(driver)
     async with session_pool:
         await session_pool.execute_with_retries(
@@ -146,8 +153,11 @@ async def session_pool(driver: ydb.aio.Driver):
 
         yield session_pool
 
+
 @pytest.fixture
-async def session(session_pool: ydb.aio.QuerySessionPool):
+async def session(
+    session_pool: ydb.aio.QuerySessionPool,
+) -> AsyncGenerator[ydb.aio.QuerySession]:
     session = await session_pool.acquire()
 
     yield session

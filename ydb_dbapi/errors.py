@@ -4,10 +4,6 @@ import ydb
 from google.protobuf.message import Message
 
 
-class Warning(Exception):
-    pass
-
-
 class Error(Exception):
     def __init__(
         self,

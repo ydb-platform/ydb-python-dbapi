@@ -1,5 +1,7 @@
 import functools
 from enum import Enum
+from typing import Any
+from typing import Callable
 
 import ydb
 
@@ -12,9 +14,9 @@ from .errors import OperationalError
 from .errors import ProgrammingError
 
 
-def handle_ydb_errors(func):
+def handle_ydb_errors(func: Callable) -> Callable:
     @functools.wraps(func)
-    async def wrapper(*args, **kwargs):
+    async def wrapper(*args: tuple, **kwargs: dict) -> Any:
         try:
             return await func(*args, **kwargs)
         except (ydb.issues.AlreadyExists, ydb.issues.PreconditionFailed) as e:
