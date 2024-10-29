@@ -8,9 +8,17 @@ import pytest
 import pytest_asyncio
 import ydb
 import ydb_dbapi as dbapi
+from sqlalchemy.util import await_only, greenlet_spawn
+from inspect import iscoroutine
 
 
-class BaseSyncDBApiTestSuit:
+def maybe_await(obj):
+    if not iscoroutine(obj):
+        return obj
+    return await_only(obj)
+
+
+class BaseDBApiTestSuit:
     def _test_isolation_level_read_only(
         self,
         connection: dbapi.Connection,
@@ -18,73 +26,69 @@ class BaseSyncDBApiTestSuit:
         read_only: bool,
     ) -> None:
         connection.set_isolation_level("AUTOCOMMIT")
-        with connection.cursor() as cursor:  # noqa: SIM117
-            with suppress(dbapi.DatabaseError):
-                cursor.execute("DROP TABLE foo")
+        cursor = connection.cursor()
+        with suppress(dbapi.DatabaseError):
+            maybe_await(cursor.execute("DROP TABLE foo"))
 
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "CREATE TABLE foo(id Int64 NOT NULL, PRIMARY KEY (id))"
-            )
+        cursor = connection.cursor()
+        maybe_await(cursor.execute(
+            "CREATE TABLE foo(id Int64 NOT NULL, PRIMARY KEY (id))"
+        ))
 
         connection.set_isolation_level(isolation_level)
+        cursor = connection.cursor()
 
-        with connection.cursor() as cursor:
-            query = "UPSERT INTO foo(id) VALUES (1)"
-            if read_only:
-                with pytest.raises(dbapi.DatabaseError):
-                    cursor.execute(query)
-                    cursor._scroll_stream()
+        query = "UPSERT INTO foo(id) VALUES (1)"
+        if read_only:
+            with pytest.raises(dbapi.DatabaseError):
+                maybe_await(cursor.execute(query))
 
-            else:
-                cursor.execute(query)
+        else:
+            maybe_await(cursor.execute(query))
 
-        connection.rollback()
+        maybe_await(connection.rollback())
 
         connection.set_isolation_level("AUTOCOMMIT")
 
-        with connection.cursor() as cursor:
-            cursor.execute("DROP TABLE foo")
+        cursor = connection.cursor()
+
+        maybe_await(cursor.execute("DROP TABLE foo"))
 
     def _test_connection(self, connection: dbapi.Connection) -> None:
-        connection.commit()
-        connection.rollback()
+        maybe_await(connection.commit())
+        maybe_await(connection.rollback())
 
         cur = connection.cursor()
         with suppress(dbapi.DatabaseError):
-            cur.execute("DROP TABLE foo")
-            cur._scroll_stream()
+            maybe_await(cur.execute("DROP TABLE foo"))
 
-        assert not connection.check_exists("/local/foo")
+        assert not maybe_await(connection.check_exists("/local/foo"))
         with pytest.raises(dbapi.ProgrammingError):
-            connection.describe("/local/foo")
+            maybe_await(connection.describe("/local/foo"))
 
-        cur.execute("CREATE TABLE foo(id Int64 NOT NULL, PRIMARY KEY (id))")
-        cur._scroll_stream()
+        maybe_await(cur.execute("CREATE TABLE foo(id Int64 NOT NULL, PRIMARY KEY (id))"))
 
-        assert connection.check_exists("/local/foo")
+        assert maybe_await(connection.check_exists("/local/foo"))
 
-        col = (connection.describe("/local/foo")).columns[0]
+        col = (maybe_await(connection.describe("/local/foo"))).columns[0]
         assert col.name == "id"
         assert col.type == ydb.PrimitiveType.Int64
 
-        cur.execute("DROP TABLE foo")
-        cur.close()
+        maybe_await(cur.execute("DROP TABLE foo"))
+        maybe_await(cur.close())
 
     def _test_cursor_raw_query(self, connection: dbapi.Connection) -> None:
         cur = connection.cursor()
         assert cur
 
         with suppress(dbapi.DatabaseError):
-            cur.execute("DROP TABLE test")
-            cur._scroll_stream()
+            maybe_await(cur.execute("DROP TABLE test"))
 
-        cur.execute(
+        maybe_await(cur.execute(
             "CREATE TABLE test(id Int64 NOT NULL, text Utf8, PRIMARY KEY (id))"
-        )
-        cur._scroll_stream()
+        ))
 
-        cur.execute(
+        maybe_await(cur.execute(
             """
             DECLARE $data AS List<Struct<id:Int64, text: Utf8>>;
 
@@ -103,52 +107,48 @@ class BaseSyncDBApiTestSuit:
                     ),
                 )
             },
-        )
-        cur._scroll_stream()
+        ))
 
-        cur.execute("DROP TABLE test")
+        maybe_await(cur.execute("DROP TABLE test"))
 
-        cur.close()
+        maybe_await(cur.close())
 
-    def _test_errors(self, connection: dbapi.Connection) -> None:
+    def _test_errors(self, connection: dbapi.Connection, connect_method=dbapi.connect) -> None:
         with pytest.raises(dbapi.InterfaceError):
-            dbapi.connect(
+            maybe_await(connect_method(
                 "localhost:2136",  # type: ignore
                 database="/local666",  # type: ignore
-            )
+            ))
 
         cur = connection.cursor()
 
         with suppress(dbapi.DatabaseError):
-            cur.execute("DROP TABLE test")
-            cur._scroll_stream()
+            maybe_await(cur.execute("DROP TABLE test"))
 
         with pytest.raises(dbapi.DataError):
-            cur.execute("SELECT 18446744073709551616")
+            maybe_await(cur.execute("SELECT 18446744073709551616"))
 
         with pytest.raises(dbapi.DataError):
-            cur.execute("SELECT * FROM 拉屎")
+            maybe_await(cur.execute("SELECT * FROM 拉屎"))
 
         with pytest.raises(dbapi.DataError):
-            cur.execute("SELECT floor(5 / 2)")
+            maybe_await(cur.execute("SELECT floor(5 / 2)"))
 
         with pytest.raises(dbapi.ProgrammingError):
-            cur.execute("SELECT * FROM test")
+            maybe_await(cur.execute("SELECT * FROM test"))
 
-        cur.execute("CREATE TABLE test(id Int64, PRIMARY KEY (id))")
-        cur._scroll_stream()
+        maybe_await(cur.execute("CREATE TABLE test(id Int64, PRIMARY KEY (id))"))
 
-        cur.execute("INSERT INTO test(id) VALUES(1)")
-        cur._scroll_stream()
+        maybe_await(cur.execute("INSERT INTO test(id) VALUES(1)"))
 
         with pytest.raises(dbapi.IntegrityError):
-            cur.execute("INSERT INTO test(id) VALUES(1)")
+            maybe_await(cur.execute("INSERT INTO test(id) VALUES(1)"))
 
-        cur.execute("DROP TABLE test")
-        cur.close()
+        maybe_await(cur.execute("DROP TABLE test"))
+        maybe_await(cur.close())
 
 
-class TestConnection(BaseSyncDBApiTestSuit):
+class TestConnection(BaseDBApiTestSuit):
     @pytest.fixture
     def connection(
         self, connection_kwargs: dict
@@ -190,160 +190,19 @@ class TestConnection(BaseSyncDBApiTestSuit):
         self._test_errors(connection)
 
 
-class BaseAsyncDBApiTestSuit:
-    async def _test_isolation_level_read_only(
-        self,
-        connection: dbapi.AsyncConnection,
-        isolation_level: str,
-        read_only: bool,
-    ) -> None:
-        connection.set_isolation_level("AUTOCOMMIT")
-        async with connection.cursor() as cursor:
-            with suppress(dbapi.DatabaseError):
-                await cursor.execute("DROP TABLE foo")
-
-        async with connection.cursor() as cursor:
-            await cursor.execute(
-                "CREATE TABLE foo(id Int64 NOT NULL, PRIMARY KEY (id))"
-            )
-
-        connection.set_isolation_level(isolation_level)
-
-        async with connection.cursor() as cursor:
-            query = "UPSERT INTO foo(id) VALUES (1)"
-            if read_only:
-                with pytest.raises(dbapi.DatabaseError):
-                    await cursor.execute(query)
-                    await cursor._scroll_stream()
-
-            else:
-                await cursor.execute(query)
-
-        await connection.rollback()
-
-        connection.set_isolation_level("AUTOCOMMIT")
-
-        async with connection.cursor() as cursor:
-            await cursor.execute("DROP TABLE foo")
-
-    async def _test_connection(
-        self, connection: dbapi.AsyncConnection
-    ) -> None:
-        await connection.commit()
-        await connection.rollback()
-
-        cur = connection.cursor()
-        with suppress(dbapi.DatabaseError):
-            await cur.execute("DROP TABLE foo")
-            await cur._scroll_stream()
-
-        assert not await connection.check_exists("/local/foo")
-        with pytest.raises(dbapi.ProgrammingError):
-            await connection.describe("/local/foo")
-
-        await cur.execute(
-            "CREATE TABLE foo(id Int64 NOT NULL, PRIMARY KEY (id))"
-        )
-        await cur._scroll_stream()
-
-        assert await connection.check_exists("/local/foo")
-
-        col = (await connection.describe("/local/foo")).columns[0]
-        assert col.name == "id"
-        assert col.type == ydb.PrimitiveType.Int64
-
-        await cur.execute("DROP TABLE foo")
-        await cur.close()
-
-    async def _test_cursor_raw_query(
-        self, connection: dbapi.AsyncConnection
-    ) -> None:
-        cur = connection.cursor()
-        assert cur
-
-        with suppress(dbapi.DatabaseError):
-            await cur.execute("DROP TABLE test")
-            await cur._scroll_stream()
-
-        await cur.execute(
-            "CREATE TABLE test(id Int64 NOT NULL, text Utf8, PRIMARY KEY (id))"
-        )
-        await cur._scroll_stream()
-
-        await cur.execute(
-            """
-            DECLARE $data AS List<Struct<id:Int64, text: Utf8>>;
-
-            INSERT INTO test SELECT id, text FROM AS_TABLE($data);
-            """,
-            {
-                "$data": ydb.TypedValue(
-                    [
-                        {"id": 17, "text": "seventeen"},
-                        {"id": 21, "text": "twenty one"},
-                    ],
-                    ydb.ListType(
-                        ydb.StructType()
-                        .add_member("id", ydb.PrimitiveType.Int64)
-                        .add_member("text", ydb.PrimitiveType.Utf8)
-                    ),
-                )
-            },
-        )
-        await cur._scroll_stream()
-
-        await cur.execute("DROP TABLE test")
-
-        await cur.close()
-
-    async def _test_errors(self, connection: dbapi.AsyncConnection) -> None:
-        with pytest.raises(dbapi.InterfaceError):
-            await dbapi.async_connect(
-                "localhost:2136",  # type: ignore
-                database="/local666",  # type: ignore
-            )
-
-        cur = connection.cursor()
-
-        with suppress(dbapi.DatabaseError):
-            await cur.execute("DROP TABLE test")
-            await cur._scroll_stream()
-
-        with pytest.raises(dbapi.DataError):
-            await cur.execute("SELECT 18446744073709551616")
-
-        with pytest.raises(dbapi.DataError):
-            await cur.execute("SELECT * FROM 拉屎")
-
-        with pytest.raises(dbapi.DataError):
-            await cur.execute("SELECT floor(5 / 2)")
-
-        with pytest.raises(dbapi.ProgrammingError):
-            await cur.execute("SELECT * FROM test")
-
-        await cur.execute("CREATE TABLE test(id Int64, PRIMARY KEY (id))")
-        await cur._scroll_stream()
-
-        await cur.execute("INSERT INTO test(id) VALUES(1)")
-        await cur._scroll_stream()
-
-        with pytest.raises(dbapi.IntegrityError):
-            await cur.execute("INSERT INTO test(id) VALUES(1)")
-
-        await cur.execute("DROP TABLE test")
-        await cur.close()
-
-
-class TestAsyncConnection(BaseAsyncDBApiTestSuit):
+class TestAsyncConnection(BaseDBApiTestSuit):
     @pytest_asyncio.fixture
     async def connection(
         self, connection_kwargs: dict
     ) -> AsyncGenerator[dbapi.AsyncConnection]:
-        conn = await dbapi.async_connect(**connection_kwargs)  # ignore: typing
+        def connect():
+            return maybe_await(dbapi.async_connect(**connection_kwargs))
+
+        conn = await greenlet_spawn(connect)
         try:
             yield conn
         finally:
-            await conn.close()
+            await greenlet_spawn(conn.close)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -363,20 +222,21 @@ class TestAsyncConnection(BaseAsyncDBApiTestSuit):
         read_only: bool,
         connection: dbapi.AsyncConnection,
     ) -> None:
-        await self._test_isolation_level_read_only(
+        await greenlet_spawn(
+            self._test_isolation_level_read_only,
             connection, isolation_level, read_only
         )
 
     @pytest.mark.asyncio
     async def test_connection(self, connection: dbapi.AsyncConnection) -> None:
-        await self._test_connection(connection)
+        await greenlet_spawn(self._test_connection, connection)
 
     @pytest.mark.asyncio
     async def test_cursor_raw_query(
         self, connection: dbapi.AsyncConnection
     ) -> None:
-        await self._test_cursor_raw_query(connection)
+        await greenlet_spawn(self._test_cursor_raw_query, connection)
 
     @pytest.mark.asyncio
     async def test_errors(self, connection: dbapi.AsyncConnection) -> None:
-        await self._test_errors(connection)
+        await greenlet_spawn(self._test_errors, connection)

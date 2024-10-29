@@ -135,10 +135,6 @@ class BaseConnection:
     def cursor(self) -> Cursor | AsyncCursor:
         if self._session is None:
             raise RuntimeError("Connection is not ready, use wait_ready.")
-        if self._current_cursor and not self._current_cursor.is_closed:
-            raise RuntimeError(
-                "Unable to create new Cursor before closing existing one."
-            )
 
         if self.interactive_transaction:
             self._tx_context = self._session.transaction(self._tx_mode)
