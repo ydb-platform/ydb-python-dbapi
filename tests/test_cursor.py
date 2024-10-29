@@ -1,11 +1,10 @@
 import pytest
 import ydb_dbapi
-import ydb_dbapi.cursors
 
 
 @pytest.mark.asyncio
 async def test_cursor_ddl(session_pool):
-    cursor = ydb_dbapi.cursors.Cursor(session_pool=session_pool)
+    cursor = ydb_dbapi.Cursor(session_pool=session_pool)
 
     yql = """
         CREATE TABLE table (
@@ -29,7 +28,7 @@ async def test_cursor_ddl(session_pool):
 
 @pytest.mark.asyncio
 async def test_cursor_dml(session_pool):
-    cursor = ydb_dbapi.cursors.Cursor(session_pool=session_pool)
+    cursor = ydb_dbapi.Cursor(session_pool=session_pool)
     yql_text = """
     INSERT INTO table (id, val) VALUES
     (1, 1),
@@ -40,7 +39,7 @@ async def test_cursor_dml(session_pool):
     await cursor.execute(query=yql_text)
     assert await cursor.fetchone() is None
 
-    cursor = ydb_dbapi.cursors.Cursor(session_pool=session_pool)
+    cursor = ydb_dbapi.Cursor(session_pool=session_pool)
 
     yql_text = """
     SELECT COUNT(*) FROM table as sum
@@ -55,7 +54,7 @@ async def test_cursor_dml(session_pool):
 
 @pytest.mark.asyncio
 async def test_cursor_fetch_one(session_pool):
-    cursor = ydb_dbapi.cursors.Cursor(session_pool=session_pool)
+    cursor = ydb_dbapi.Cursor(session_pool=session_pool)
     yql_text = """
     INSERT INTO table (id, val) VALUES
     (1, 1),
@@ -65,7 +64,7 @@ async def test_cursor_fetch_one(session_pool):
     await cursor.execute(query=yql_text)
     assert await cursor.fetchone() is None
 
-    cursor = ydb_dbapi.cursors.Cursor(session_pool=session_pool)
+    cursor = ydb_dbapi.Cursor(session_pool=session_pool)
 
     yql_text = """
     SELECT id, val FROM table
@@ -84,7 +83,7 @@ async def test_cursor_fetch_one(session_pool):
 
 @pytest.mark.asyncio
 async def test_cursor_fetch_many(session_pool):
-    cursor = ydb_dbapi.cursors.Cursor(session_pool=session_pool)
+    cursor = ydb_dbapi.Cursor(session_pool=session_pool)
     yql_text = """
     INSERT INTO table (id, val) VALUES
     (1, 1),
@@ -96,7 +95,7 @@ async def test_cursor_fetch_many(session_pool):
     await cursor.execute(query=yql_text)
     assert await cursor.fetchone() is None
 
-    cursor = ydb_dbapi.cursors.Cursor(session_pool=session_pool)
+    cursor = ydb_dbapi.Cursor(session_pool=session_pool)
 
     yql_text = """
     SELECT id, val FROM table
@@ -122,4 +121,58 @@ async def test_cursor_fetch_many(session_pool):
 
 @pytest.mark.asyncio
 async def test_cursor_fetch_all(session_pool):
-    pass
+    cursor = ydb_dbapi.Cursor(session_pool=session_pool)
+    yql_text = """
+    INSERT INTO table (id, val) VALUES
+    (1, 1),
+    (2, 2),
+    (3, 3)
+    """
+
+    await cursor.execute(query=yql_text)
+    assert await cursor.fetchone() is None
+
+    cursor = ydb_dbapi.Cursor(session_pool=session_pool)
+
+    yql_text = """
+    SELECT id, val FROM table
+    """
+
+    await cursor.execute(query=yql_text)
+
+    assert cursor.rowcount == 3
+
+    res = await cursor.fetchall()
+    assert len(res) == 3
+    assert res[0][0] == 1
+    assert res[1][0] == 2
+    assert res[2][0] == 3
+
+    assert await cursor.fetchall() is None
+
+
+@pytest.mark.asyncio
+async def test_cursor_next_set(session_pool):
+    cursor = ydb_dbapi.Cursor(session_pool=session_pool)
+    yql_text = """SELECT 1 as val; SELECT 2 as val;"""
+
+    await cursor.execute(query=yql_text)
+
+    res = await cursor.fetchall()
+    assert len(res) == 1
+    assert res[0][0] == 1
+
+    nextset = await cursor.nextset()
+    assert nextset
+
+    res = await cursor.fetchall()
+    assert len(res) == 1
+    assert res[0][0] == 2
+
+    nextset = await cursor.nextset()
+    assert nextset
+
+    assert await cursor.fetchall() is None
+
+    nextset = await cursor.nextset()
+    assert not nextset

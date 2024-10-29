@@ -54,8 +54,8 @@ class Cursor:
 
         self._stream: Optional[AsyncIterator] = None
         self._rows: Optional[Iterator[Dict]] = None
+        self._rows_count: int = -1
 
-    @handle_ydb_errors
     async def _execute_generic_query(
         self, query: str, parameters: Optional[ParametersType] = None
     ) -> List[ydb.convert.ResultSet]:
@@ -63,7 +63,6 @@ class Cursor:
             query=query, parameters=parameters
         )
 
-    @handle_ydb_errors
     async def _execute_transactional_query(
         self, query: str, parameters: Optional[ParametersType] = None
     ) -> AsyncIterator:
@@ -100,6 +99,7 @@ class Cursor:
     def _update_result_set(self, result_set: ydb.convert.ResultSet):
         self._update_description(result_set)
         self._rows = self._rows_iterable(result_set)
+        self._rows_count = len(result_set.rows) or -1
 
     def _update_description(self, result_set: ydb.convert.ResultSet):
         self._description = [
@@ -142,7 +142,7 @@ class Cursor:
         )
 
     async def fetchall(self):
-        return list(self._rows or iter([]))
+        return list(self._rows or iter([])) or None
 
     async def nextset(self):
         if self._stream is None:
@@ -150,7 +150,7 @@ class Cursor:
         try:
             result_set = await self._stream.__anext__()
             self._update_result_set(result_set)
-        except StopIteration:
+        except (StopIteration, RuntimeError):
             return False
         return True
 
@@ -171,4 +171,4 @@ class Cursor:
 
     @property
     def rowcount(self):
-        pass
+        return self._rows_count
