@@ -6,9 +6,9 @@ from .connections import connect
 from .cursors import AsyncCursor
 from .cursors import Cursor
 from .errors import *
-from .version import version
+from .version import VERSION
 
-__version__ = version
+__version__ = VERSION
 
 apilevel = "2.0"
 threadsafety = 0
