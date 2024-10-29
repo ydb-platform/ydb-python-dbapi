@@ -36,6 +36,7 @@ ruff = "ruff check"
 lint = ["mypy", "ruff"]
 format-check = "ruff format --check"
 format = "ruff format"
+tests = "pytest -v  --docker-compose-remove-volumes --docker-compose=docker-compose.yml"
 
 [tool.ruff]
 exclude = [".venv", ".git", "__pycache__", "build", "dist", "venv"]
@@ -48,6 +49,7 @@ select = ["F", "E"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+addopts = "-p no:warnings"
 
 [[tool.mypy.overrides]]
 module = "ydb.*"

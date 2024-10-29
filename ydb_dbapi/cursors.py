@@ -12,7 +12,7 @@ from typing import (
 )
 
 import ydb
-from .errors import DatabaseError
+from .errors import Error, DatabaseError
 from .utils import handle_ydb_errors, AsyncFromSyncIterator
 
 
@@ -40,8 +40,6 @@ class Cursor:
     def __init__(
         self,
         session_pool: ydb.aio.QuerySessionPool,
-        session: ydb.aio.QuerySession,
-        tx_mode: Optional[ydb.aio.QueryTxContext] = None,
         tx_context: Optional[ydb.aio.QueryTxContext] = None,
         table_path_prefix: str = "",
         autocommit: bool = True,
@@ -49,10 +47,8 @@ class Cursor:
         self.arraysize: int = 1
         self._description: Optional[List[Tuple]] = None
 
-        self._pool = session_pool
-        self._session = session
-        self._tx_mode = tx_mode
-        self._tx_context: ydb.aio.QueryTxContext = tx_context
+        self._session_pool = session_pool
+        self._tx_context = tx_context
         self._table_path_prefix = table_path_prefix
         self._autocommit = autocommit
 
@@ -60,17 +56,21 @@ class Cursor:
         self._rows: Optional[Iterator[Dict]] = None
 
     @handle_ydb_errors
-    async def _execute_ddl_query(
+    async def _execute_generic_query(
         self, query: str, parameters: Optional[ParametersType] = None
     ) -> List[ydb.convert.ResultSet]:
-        return await self._pool.execute_with_retries(
+        return await self._session_pool.execute_with_retries(
             query=query, parameters=parameters
         )
 
     @handle_ydb_errors
-    async def _execute_dml_query(
+    async def _execute_transactional_query(
         self, query: str, parameters: Optional[ParametersType] = None
     ) -> AsyncIterator:
+        if self._tx_context is None:
+            raise Error(
+                "Unable to execute tx based queries without transaction."
+            )
         return await self._tx_context.execute(
             query=query,
             parameters=parameters,
@@ -79,17 +79,17 @@ class Cursor:
 
     @handle_ydb_errors
     async def execute(
-        self, operation: YdbQuery, parameters: Optional[ParametersType] = None
+        self, query: str, parameters: Optional[ParametersType] = None
     ):
-        if operation.is_ddl:
-            result_sets = await self._execute_ddl_query(
-                query=operation.yql_text, parameters=parameters
+        if self._tx_context is not None:
+            self._stream = await self._execute_transactional_query(
+                query=query, parameters=parameters
+            )
+        else:
+            result_sets = await self._execute_generic_query(
+                query=query, parameters=parameters
             )
             self._stream = AsyncFromSyncIterator(iter(result_sets))
-        else:
-            self._stream = await self._execute_dml_query(
-                query=operation.yql_text, parameters=parameters
-            )
 
         if self._stream is None:
             return
@@ -98,7 +98,6 @@ class Cursor:
         self._update_result_set(result_set)
 
     def _update_result_set(self, result_set: ydb.convert.ResultSet):
-        # self._result_set = result_set
         self._update_description(result_set)
         self._rows = self._rows_iterable(result_set)
 
@@ -133,8 +132,13 @@ class Cursor:
         return next(self._rows or iter([]), None)
 
     async def fetchmany(self, size: Optional[int] = None):
-        return list(
-            itertools.islice(self._rows or iter([]), size or self.arraysize)
+        return (
+            list(
+                itertools.islice(
+                    self._rows or iter([]), size or self.arraysize
+                )
+            )
+            or None
         )
 
     async def fetchall(self):

@@ -15,9 +15,9 @@ from .errors import (
 
 def handle_ydb_errors(func):
     @functools.wraps(func)
-    def wrapper(*args, **kwargs):
+    async def wrapper(*args, **kwargs):
         try:
-            return func(*args, **kwargs)
+            return await func(*args, **kwargs)
         except (ydb.issues.AlreadyExists, ydb.issues.PreconditionFailed) as e:
             raise IntegrityError(e.message, original_error=e) from e
         except (ydb.issues.Unsupported, ydb.issues.Unimplemented) as e:
