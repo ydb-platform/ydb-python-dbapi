@@ -76,7 +76,7 @@ force-single-line = true
 
 [tool.ruff.lint.per-file-ignores]
 "**/test_*.py" = ["S", "SLF", "ANN201", "ARG", "PLR2004", "PT012"]
-"conftest.py" = ["ARG001"]
+"conftest.py" = ["S", "ARG001"]
 "__init__.py" = ["F401", "F403"]
 
 [tool.pytest.ini_options]

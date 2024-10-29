@@ -3,16 +3,17 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from collections.abc import Generator
 from contextlib import suppress
+from inspect import iscoroutine
 
 import pytest
 import pytest_asyncio
 import ydb
 import ydb_dbapi as dbapi
-from sqlalchemy.util import await_only, greenlet_spawn
-from inspect import iscoroutine
+from sqlalchemy.util import await_only
+from sqlalchemy.util import greenlet_spawn
 
 
-def maybe_await(obj):
+def maybe_await(obj: callable) -> any:
     if not iscoroutine(obj):
         return obj
     return await_only(obj)
@@ -66,7 +67,9 @@ class BaseDBApiTestSuit:
         with pytest.raises(dbapi.ProgrammingError):
             maybe_await(connection.describe("/local/foo"))
 
-        maybe_await(cur.execute("CREATE TABLE foo(id Int64 NOT NULL, PRIMARY KEY (id))"))
+        maybe_await(cur.execute(
+            "CREATE TABLE foo(id Int64 NOT NULL, PRIMARY KEY (id))"
+        ))
 
         assert maybe_await(connection.check_exists("/local/foo"))
 
@@ -113,7 +116,11 @@ class BaseDBApiTestSuit:
 
         maybe_await(cur.close())
 
-    def _test_errors(self, connection: dbapi.Connection, connect_method=dbapi.connect) -> None:
+    def _test_errors(
+        self,
+        connection: dbapi.Connection,
+        connect_method: callable = dbapi.connect
+    ) -> None:
         with pytest.raises(dbapi.InterfaceError):
             maybe_await(connect_method(
                 "localhost:2136",  # type: ignore
@@ -137,7 +144,9 @@ class BaseDBApiTestSuit:
         with pytest.raises(dbapi.ProgrammingError):
             maybe_await(cur.execute("SELECT * FROM test"))
 
-        maybe_await(cur.execute("CREATE TABLE test(id Int64, PRIMARY KEY (id))"))
+        maybe_await(cur.execute(
+            "CREATE TABLE test(id Int64, PRIMARY KEY (id))"
+        ))
 
         maybe_await(cur.execute("INSERT INTO test(id) VALUES(1)"))
 
@@ -195,7 +204,7 @@ class TestAsyncConnection(BaseDBApiTestSuit):
     async def connection(
         self, connection_kwargs: dict
     ) -> AsyncGenerator[dbapi.AsyncConnection]:
-        def connect():
+        def connect() -> dbapi.AsyncConnection:
             return maybe_await(dbapi.async_connect(**connection_kwargs))
 
         conn = await greenlet_spawn(connect)

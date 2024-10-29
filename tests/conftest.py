@@ -185,3 +185,45 @@ def session_pool_sync(
             )
 
         yield session_pool
+
+
+@pytest.fixture
+async def session(
+    session_pool: ydb.aio.QuerySessionPool,
+) -> AsyncGenerator[ydb.aio.QuerySession]:
+    for name in ["table", "table1", "table2"]:
+        await session_pool.execute_with_retries(
+            f"""
+            DELETE FROM {name};
+            INSERT INTO {name} (id, val) VALUES
+            (0, 0),
+            (1, 1),
+            (2, 2),
+            (3, 3)
+            """
+        )
+
+    session = await session_pool.acquire()
+    yield session
+    await session_pool.release(session)
+
+
+@pytest.fixture
+def session_sync(
+    session_pool_sync: ydb.QuerySessionPool,
+) -> Generator[ydb.QuerySession]:
+    for name in ["table", "table1", "table2"]:
+        session_pool_sync.execute_with_retries(
+            f"""
+            DELETE FROM {name};
+            INSERT INTO {name} (id, val) VALUES
+            (0, 0),
+            (1, 1),
+            (2, 2),
+            (3, 3)
+            """
+        )
+
+    session = session_pool_sync.acquire()
+    yield session
+    session_pool_sync.release(session)
