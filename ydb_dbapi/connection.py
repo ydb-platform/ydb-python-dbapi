@@ -1,10 +1,17 @@
 from typing import (
     Any,
+    List,
     NamedTuple,
     Optional,
 )
+import posixpath
 
 import ydb
+from ydb.retries import retry_operation_async
+
+from .utils import (
+    handle_ydb_errors,
+)
 
 from .errors import (
     # InterfaceError,
@@ -37,6 +44,8 @@ class Connection:
         self.table_path_prefix = self.conn_kwargs.pop(
             "ydb_table_path_prefix", ""
         )
+
+        self.driver: ydb.aio.Driver = self.conn_kwargs.pop("ydb_driver", None)
 
         self.session_pool: ydb.aio.QuerySessionPool = self.conn_kwargs.pop(
             "ydb_session_pool", None
@@ -124,6 +133,48 @@ class Connection:
             return IsolationLevel.SNAPSHOT_READONLY
         else:
             raise NotSupportedError(f"{self.tx_mode.name} is not supported")
+
+    @handle_ydb_errors
+    async def describe(self, table_path: str) -> ydb.TableSchemeEntry:
+        abs_table_path = posixpath.join(
+            self.database, self.table_path_prefix, table_path
+        )
+        return self.driver.table_client.describe_table(abs_table_path)
+
+    @handle_ydb_errors
+    async def check_exists(self, table_path: str) -> ydb.SchemeEntry:
+        abs_table_path = posixpath.join(
+            self.database, self.table_path_prefix, table_path
+        )
+        return await self._check_path_exists(abs_table_path)
+
+    @handle_ydb_errors
+    async def get_table_names(self) -> List[str]:
+        abs_dir_path = posixpath.join(self.database, self.table_path_prefix)
+        names = await self._get_table_names(abs_dir_path)
+        return [posixpath.relpath(path, abs_dir_path) for path in names]
+
+    async def _check_path_exists(self, table_path: str) -> ydb.SchemeEntry:
+        try:
+            await retry_operation_async(
+                self.driver.scheme_client.describe_path, table_path
+            )
+            return True
+        except ydb.SchemeError:
+            return False
+
+    async def _get_table_names(self, abs_dir_path: str) -> List[str]:
+        directory = await retry_operation_async(
+            self.driver.scheme_client.list_directory, abs_dir_path
+        )
+        result = []
+        for child in directory.children:
+            child_abs_path = posixpath.join(abs_dir_path, child.name)
+            if child.is_table():
+                result.append(child_abs_path)
+            elif child.is_directory() and not child.name.startswith("."):
+                result.extend(self.get_table_names(child_abs_path))
+        return result
 
 
 async def connect() -> Connection:
