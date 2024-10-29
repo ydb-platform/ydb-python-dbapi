@@ -68,6 +68,9 @@ class Connection:
         self._tx_context: Optional[ydb.QueryTxContext] = None
         self._tx_mode: ydb.BaseQueryTxMode = ydb.QuerySerializableReadWrite()
 
+        self._current_cursor: Optional[Cursor] = None
+        self.interactive_transaction: bool = False
+
     async def _wait(self, timeout: int = 5):
         try:
             await self._driver.wait(timeout, fail_fast=True)
@@ -81,15 +84,22 @@ class Connection:
             ) from e
 
     def cursor(self):
-        return Cursor(
-            session_pool=self._session_pool, tx_context=self._tx_context
+        if self._current_cursor and not self._current_cursor._closed:
+            raise RuntimeError(
+                "Unable to create new Cursor before closing existing one."
+            )
+        self._current_cursor = Cursor(
+            session_pool=self._session_pool,
+            tx_context=self._tx_context,
+            autocommit=(not self.interactive_transaction),
         )
+        return self._current_cursor
 
     async def begin(self):
         self._tx_context = None
         self._session = await self._session_pool.acquire()
         self._tx_context = self._session.transaction(self._tx_mode)
-        await self._tx_context.begin()
+        # await self._tx_context.begin()
 
     async def commit(self):
         if self._tx_context and self._tx_context.tx_id:
@@ -107,6 +117,10 @@ class Connection:
 
     async def close(self):
         await self.rollback()
+
+        if self._current_cursor:
+            await self._current_cursor.close()
+
         if not self._shared_session_pool:
             await self._session_pool.stop()
             await self._driver.stop()

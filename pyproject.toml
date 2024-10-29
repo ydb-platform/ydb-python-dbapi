@@ -49,7 +49,7 @@ select = ["F", "E"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-addopts = "-p no:warnings"
+addopts = "--tb native -v -r fxX -p no:warnings"
 
 [[tool.mypy.overrides]]
 module = "ydb.*"
