@@ -151,18 +151,17 @@ async def session_pool(
 ) -> AsyncGenerator[ydb.aio.QuerySessionPool]:
     session_pool = ydb.aio.QuerySessionPool(driver)
     async with session_pool:
-        await session_pool.execute_with_retries(
-            """DROP TABLE IF EXISTS table"""
-        )
-        await session_pool.execute_with_retries(
-            """
-            CREATE TABLE table (
-            id Int64 NOT NULL,
-            val Int64,
-            PRIMARY KEY(id)
+        for name in ["table", "table1", "table2"]:
+            await session_pool.execute_with_retries(
+                f"""
+                DROP TABLE IF EXISTS {name};
+                CREATE TABLE {name} (
+                id Int64 NOT NULL,
+                val Int64,
+                PRIMARY KEY(id)
+                )
+                """
             )
-            """
-        )
 
         yield session_pool
 
@@ -173,14 +172,16 @@ def session_pool_sync(
 ) -> Generator[ydb.QuerySessionPool]:
     session_pool = ydb.QuerySessionPool(driver_sync)
     with session_pool:
-        session_pool.execute_with_retries("""DROP TABLE IF EXISTS table""")
-        session_pool.execute_with_retries(
-            """
-            CREATE TABLE table (
-            id Int64 NOT NULL,
-            val Int64,
-            PRIMARY KEY(id)
+        for name in ["table", "table1", "table2"]:
+            session_pool.execute_with_retries(
+                f"""
+                DROP TABLE IF EXISTS {name};
+                CREATE TABLE {name} (
+                id Int64 NOT NULL,
+                val Int64,
+                PRIMARY KEY(id)
+                )
+                """
             )
-            """
-        )
+
         yield session_pool

@@ -106,18 +106,13 @@ class BaseCursor:
     def _fetchone_from_buffer(self) -> tuple | None:
         return next(self._rows or iter([]), None)
 
-    def _fetchmany_from_buffer(self, size: int | None = None) -> list | None:
-        return (
-            list(
-                itertools.islice(
-                    self._rows or iter([]), size or self.arraysize
-                )
-            )
-            or None
+    def _fetchmany_from_buffer(self, size: int | None = None) -> list:
+        return list(
+            itertools.islice(self._rows or iter([]), size or self.arraysize)
         )
 
-    def _fetchall_from_buffer(self) -> list | None:
-        return list(self._rows or iter([])) or None
+    def _fetchall_from_buffer(self) -> list:
+        return list(self._rows or iter([]))
 
 
 class Cursor(BaseCursor):
@@ -151,11 +146,28 @@ class Cursor(BaseCursor):
 
         return row
 
-    def fetchmany(self, size: int | None = None) -> list | None:
-        return self._fetchmany_from_buffer(size)
+    def fetchmany(self, size: int | None = None) -> list:
+        size = size or self.arraysize
+        rows = self._fetchmany_from_buffer(size)
+        if not self._auto_scroll:
+            return rows
 
-    def fetchall(self) -> list | None:
-        return self._fetchall_from_buffer()
+        while len(rows) < size and self.nextset():
+            new_rows = self._fetchmany_from_buffer(size - len(rows))
+            rows.extend(new_rows)
+
+        return rows
+
+    def fetchall(self) -> list:
+        rows = self._fetchall_from_buffer()
+        if not self._auto_scroll:
+            return rows
+
+        while self.nextset():
+            new_rows = self._fetchall_from_buffer()
+            rows.extend(new_rows)
+
+        return rows
 
     @handle_ydb_errors
     def _execute_generic_query(
@@ -255,22 +267,51 @@ class AsyncCursor(BaseCursor):
         tx_context: ydb.aio.QueryTxContext | None = None,
         table_path_prefix: str = "",
         autocommit: bool = True,
+        auto_scroll_result_sets: bool = False,
     ) -> None:
         self._session = session
         self._tx_context = tx_context
         self._table_path_prefix = table_path_prefix
         self._autocommit = autocommit
+        self._auto_scroll = auto_scroll_result_sets
 
         self._stream: AsyncIterator | None = None
 
     async def fetchone(self) -> tuple | None:
-        return self._fetchone_from_buffer()
+        row = self._fetchone_from_buffer()
+        if not self._auto_scroll:
+            return row
 
-    async def fetchmany(self, size: int | None = None) -> list | None:
-        return self._fetchmany_from_buffer(size)
+        if row is None:
+            while await self.nextset():
+                row = self._fetchone_from_buffer()
+                if row is not None:
+                    return row
 
-    async def fetchall(self) -> list | None:
-        return self._fetchall_from_buffer()
+        return row
+
+    async def fetchmany(self, size: int | None = None) -> list:
+        size = size or self.arraysize
+        rows = self._fetchmany_from_buffer(size)
+        if not self._auto_scroll:
+            return rows
+
+        while len(rows) < size and await self.nextset():
+            new_rows = self._fetchmany_from_buffer(size - len(rows))
+            rows.extend(new_rows)
+
+        return rows
+
+    async def fetchall(self) -> list:
+        rows = self._fetchall_from_buffer()
+        if not self._auto_scroll:
+            return rows
+
+        while await self.nextset():
+            new_rows = self._fetchall_from_buffer()
+            rows.extend(new_rows)
+
+        return rows
 
     @handle_ydb_errors
     async def _execute_generic_query(
