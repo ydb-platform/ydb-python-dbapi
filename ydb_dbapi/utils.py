@@ -1,4 +1,5 @@
 import functools
+from typing import Iterator
 import ydb
 
 from .errors import (
@@ -47,3 +48,14 @@ def handle_ydb_errors(func):
             raise DatabaseError("Failed to execute query") from e
 
     return wrapper
+
+
+class AsyncFromSyncIterator:
+    def __init__(self, sync_iter: Iterator):
+        self._sync_iter = sync_iter
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        return next(self._sync_iter)
