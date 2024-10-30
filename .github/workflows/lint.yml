@@ -1,0 +1,43 @@
+name: Lint
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [3.9]
+        poetry-version: [1.8]
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Poetry ${{ matrix.poetry-version }}
+        run: |
+          pip install "poetry~=${{ matrix.poetry-version }}.0"
+
+          # Ensure that Poetry is not upgraded past the version we are testing
+          poetry add "poetry@~${{ matrix.poetry-version }}" --lock
+
+      - name: Install packages
+        run: |
+          poetry install
+
+      - name: Run tests
+        run: |
+          poetry run poe lint
