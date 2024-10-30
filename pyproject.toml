@@ -61,6 +61,7 @@ ignore = [
     "TRY003", # Allow specifying long messages outside the exception class
     "SLF001", # Allow access private member,
     "PGH003", # Allow not to specify rule codes
+    "PLR0913", # Allow to have many arguments in function definition
 ]
 select = ["ALL"]
 

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import posixpath
+from enum import Enum
 from typing import NamedTuple
-from typing import TypedDict
 
 import ydb
-from typing_extensions import NotRequired
-from typing_extensions import Unpack
+from ydb import QuerySessionPool as SessionPool
+from ydb import QueryTxContext as TxContext
+from ydb.aio import QuerySessionPool as AsyncSessionPool
+from ydb.aio import QueryTxContext as AsyncTxContext
 from ydb.retries import retry_operation_async
 from ydb.retries import retry_operation_sync
 
@@ -18,7 +20,7 @@ from .errors import NotSupportedError
 from .utils import handle_ydb_errors
 
 
-class IsolationLevel:
+class IsolationLevel(str, Enum):
     SERIALIZABLE = "SERIALIZABLE"
     ONLINE_READONLY = "ONLINE READONLY"
     ONLINE_READONLY_INCONSISTENT = "ONLINE READONLY INCONSISTENT"
@@ -27,49 +29,63 @@ class IsolationLevel:
     AUTOCOMMIT = "AUTOCOMMIT"
 
 
-class ConnectionKwargs(TypedDict):
-    credentials: NotRequired[ydb.AbstractCredentials]
-    ydb_table_path_prefix: NotRequired[str]
-    ydb_session_pool: NotRequired[
-        ydb.QuerySessionPool | ydb.aio.QuerySessionPool
-    ]
+class _IsolationSettings(NamedTuple):
+    ydb_mode: ydb.BaseQueryTxMode
+    interactive: bool
+
+
+_ydb_isolation_settings_map = {
+    IsolationLevel.AUTOCOMMIT: _IsolationSettings(
+        ydb.QuerySerializableReadWrite(), interactive=False
+    ),
+    IsolationLevel.SERIALIZABLE: _IsolationSettings(
+        ydb.QuerySerializableReadWrite(), interactive=True
+    ),
+    IsolationLevel.ONLINE_READONLY: _IsolationSettings(
+        ydb.QueryOnlineReadOnly(), interactive=True
+    ),
+    IsolationLevel.ONLINE_READONLY_INCONSISTENT: _IsolationSettings(
+        ydb.QueryOnlineReadOnly().with_allow_inconsistent_reads(),
+        interactive=True,
+    ),
+    IsolationLevel.STALE_READONLY: _IsolationSettings(
+        ydb.QueryStaleReadOnly(), interactive=True
+    ),
+    IsolationLevel.SNAPSHOT_READONLY: _IsolationSettings(
+        ydb.QuerySnapshotReadOnly(), interactive=True
+    ),
+}
 
 
 class BaseConnection:
-    _tx_mode: ydb.BaseQueryTxMode = ydb.QuerySerializableReadWrite()
-    _tx_context: ydb.QueryTxContext | ydb.aio.QueryTxContext | None = None
-    interactive_transaction: bool = False
-    _shared_session_pool: bool = False
-
     _driver_cls = ydb.Driver
     _pool_cls = ydb.QuerySessionPool
-    _cursor_cls: type[Cursor | AsyncCursor] = Cursor
-
-    _driver: ydb.Driver | ydb.aio.Driver
-    _pool: ydb.QuerySessionPool | ydb.aio.QuerySessionPool
-
-    _current_cursor: AsyncCursor | Cursor | None = None
 
     def __init__(
         self,
         host: str = "",
         port: str = "",
         database: str = "",
-        **conn_kwargs: Unpack[ConnectionKwargs],
+        ydb_table_path_prefix: str = "",
+        credentials: ydb.AbstractCredentials | None = None,
+        ydb_session_pool: SessionPool | AsyncSessionPool | None = None,
+        **kwargs: dict,
     ) -> None:
         self.endpoint = f"grpc://{host}:{port}"
         self.database = database
-        self.conn_kwargs = conn_kwargs
-        self.credentials = self.conn_kwargs.pop("credentials", None)
-        self.table_path_prefix = self.conn_kwargs.pop(
-            "ydb_table_path_prefix", ""
-        )
+        self.credentials = credentials
+        self.table_path_prefix = ydb_table_path_prefix
 
-        if (
-            "ydb_session_pool" in self.conn_kwargs
-        ):  # Use session pool managed manually
+        self.connection_kwargs: dict = kwargs
+
+        self._tx_mode: ydb.BaseQueryTxMode = ydb.QuerySerializableReadWrite()
+        self._tx_context: TxContext | AsyncTxContext | None = None
+        self.interactive_transaction: bool = False
+        self._shared_session_pool: bool = False
+
+        if ydb_session_pool is not None:
             self._shared_session_pool = True
-            self._session_pool = self.conn_kwargs.pop("ydb_session_pool")
+            self._session_pool = ydb_session_pool
             self._driver = self._session_pool._driver
         else:
             driver_config = ydb.DriverConfig(
@@ -82,33 +98,8 @@ class BaseConnection:
 
         self._session: ydb.QuerySession | ydb.aio.QuerySession | None = None
 
-    def set_isolation_level(self, isolation_level: str) -> None:
-        class IsolationSettings(NamedTuple):
-            ydb_mode: ydb.BaseQueryTxMode
-            interactive: bool
-
-        ydb_isolation_settings_map = {
-            IsolationLevel.AUTOCOMMIT: IsolationSettings(
-                ydb.QuerySerializableReadWrite(), interactive=False
-            ),
-            IsolationLevel.SERIALIZABLE: IsolationSettings(
-                ydb.QuerySerializableReadWrite(), interactive=True
-            ),
-            IsolationLevel.ONLINE_READONLY: IsolationSettings(
-                ydb.QueryOnlineReadOnly(), interactive=True
-            ),
-            IsolationLevel.ONLINE_READONLY_INCONSISTENT: IsolationSettings(
-                ydb.QueryOnlineReadOnly().with_allow_inconsistent_reads(),
-                interactive=True,
-            ),
-            IsolationLevel.STALE_READONLY: IsolationSettings(
-                ydb.QueryStaleReadOnly(), interactive=True
-            ),
-            IsolationLevel.SNAPSHOT_READONLY: IsolationSettings(
-                ydb.QuerySnapshotReadOnly(), interactive=True
-            ),
-        }
-        ydb_isolation_settings = ydb_isolation_settings_map[isolation_level]
+    def set_isolation_level(self, isolation_level: IsolationLevel) -> None:
+        ydb_isolation_settings = _ydb_isolation_settings_map[isolation_level]
         if self._tx_context and self._tx_context.tx_id:
             raise InternalError(
                 "Failed to set transaction mode: transaction is already began"
@@ -132,7 +123,34 @@ class BaseConnection:
         msg = f"{self._tx_mode.name} is not supported"
         raise NotSupportedError(msg)
 
-    def cursor(self) -> Cursor | AsyncCursor:
+
+class Connection(BaseConnection):
+    _driver_cls = ydb.Driver
+    _pool_cls = ydb.QuerySessionPool
+    _cursor_cls = Cursor
+
+    def __init__(
+        self,
+        host: str = "",
+        port: str = "",
+        database: str = "",
+        ydb_table_path_prefix: str = "",
+        credentials: ydb.AbstractCredentials | None = None,
+        ydb_session_pool: SessionPool | AsyncSessionPool | None = None,
+        **kwargs: dict,
+    ) -> None:
+        super().__init__(
+            host=host,
+            port=port,
+            database=database,
+            ydb_table_path_prefix=ydb_table_path_prefix,
+            credentials=credentials,
+            ydb_session_pool=ydb_session_pool,
+            **kwargs,
+        )
+        self._current_cursor: Cursor | None = None
+
+    def cursor(self) -> Cursor:
         if self._session is None:
             raise RuntimeError("Connection is not ready, use wait_ready.")
 
@@ -147,16 +165,6 @@ class BaseConnection:
             autocommit=(not self.interactive_transaction),
         )
         return self._current_cursor
-
-
-class Connection(BaseConnection):
-    _driver_cls = ydb.Driver
-    _pool_cls = ydb.QuerySessionPool
-    _cursor_cls = Cursor
-
-    _driver: ydb.Driver
-    _pool: ydb.QuerySessionPool
-    _current_cursor: Cursor | None = None
 
     def wait_ready(self, timeout: int = 10) -> None:
         try:
@@ -248,9 +256,42 @@ class AsyncConnection(BaseConnection):
     _pool_cls = ydb.aio.QuerySessionPool
     _cursor_cls = AsyncCursor
 
-    _driver: ydb.aio.Driver
-    _pool: ydb.aio.QuerySessionPool
-    _current_cursor: AsyncCursor | None = None
+    def __init__(
+        self,
+        host: str = "",
+        port: str = "",
+        database: str = "",
+        ydb_table_path_prefix: str = "",
+        credentials: ydb.AbstractCredentials | None = None,
+        ydb_session_pool: SessionPool | AsyncSessionPool | None = None,
+        **kwargs: dict,
+    ) -> None:
+        super().__init__(
+            host=host,
+            port=port,
+            database=database,
+            ydb_table_path_prefix=ydb_table_path_prefix,
+            credentials=credentials,
+            ydb_session_pool=ydb_session_pool,
+            **kwargs,
+        )
+        self._current_cursor: AsyncCursor | None = None
+
+    def cursor(self) -> AsyncCursor:
+        if self._session is None:
+            raise RuntimeError("Connection is not ready, use wait_ready.")
+
+        if self.interactive_transaction:
+            self._tx_context = self._session.transaction(self._tx_mode)
+        else:
+            self._tx_context = None
+
+        self._current_cursor = self._cursor_cls(
+            session=self._session,
+            tx_context=self._tx_context,
+            autocommit=(not self.interactive_transaction),
+        )
+        return self._current_cursor
 
     async def wait_ready(self, timeout: int = 10) -> None:
         try:

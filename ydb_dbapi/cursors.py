@@ -11,7 +11,6 @@ import ydb
 from typing_extensions import Self
 
 from .errors import DatabaseError
-from .errors import Error
 from .errors import InterfaceError
 from .errors import ProgrammingError
 from .utils import CursorStatus
@@ -32,11 +31,12 @@ def _get_column_type(type_obj: Any) -> str:
 
 
 class BufferedCursor:
-    arraysize: int = 1
-    _rows: Iterator | None = None
-    _rows_count: int = -1
-    _description: list[tuple] | None = None
-    _state: CursorStatus = CursorStatus.ready
+    def __init__(self) -> None:
+        self.arraysize: int = 1
+        self._rows: Iterator | None = None
+        self._rows_count: int = -1
+        self._description: list[tuple] | None = None
+        self._state: CursorStatus = CursorStatus.ready
 
     @property
     def description(self) -> list[tuple] | None:
@@ -142,6 +142,7 @@ class Cursor(BufferedCursor):
         table_path_prefix: str = "",
         autocommit: bool = True,
     ) -> None:
+        super().__init__()
         self._session = session
         self._tx_context = tx_context
         self._table_path_prefix = table_path_prefix
@@ -167,13 +168,12 @@ class Cursor(BufferedCursor):
 
     @handle_ydb_errors
     def _execute_transactional_query(
-        self, query: str, parameters: ParametersType | None = None
+        self,
+        tx_context: ydb.QueryTxContext,
+        query: str,
+        parameters: ParametersType | None = None,
     ) -> Iterator[ydb.convert.ResultSet]:
-        if self._tx_context is None:
-            raise Error(
-                "Unable to execute tx based queries without transaction."
-            )
-        return self._tx_context.execute(
+        return tx_context.execute(
             query=query,
             parameters=parameters,
             commit_tx=self._autocommit,
@@ -188,15 +188,12 @@ class Cursor(BufferedCursor):
         self._raise_if_running()
         if self._tx_context is not None:
             self._stream = self._execute_transactional_query(
-                query=query, parameters=parameters
+                tx_context=self._tx_context, query=query, parameters=parameters
             )
         else:
             self._stream = self._execute_generic_query(
                 query=query, parameters=parameters
             )
-
-        if self._stream is None:
-            return
 
         self._begin_query()
 
@@ -256,6 +253,7 @@ class AsyncCursor(BufferedCursor):
         table_path_prefix: str = "",
         autocommit: bool = True,
     ) -> None:
+        super().__init__()
         self._session = session
         self._tx_context = tx_context
         self._table_path_prefix = table_path_prefix
@@ -281,13 +279,12 @@ class AsyncCursor(BufferedCursor):
 
     @handle_ydb_errors
     async def _execute_transactional_query(
-        self, query: str, parameters: ParametersType | None = None
+        self,
+        tx_context: ydb.aio.QueryTxContext,
+        query: str,
+        parameters: ParametersType | None = None,
     ) -> AsyncIterator[ydb.convert.ResultSet]:
-        if self._tx_context is None:
-            raise Error(
-                "Unable to execute tx based queries without transaction."
-            )
-        return await self._tx_context.execute(
+        return await tx_context.execute(
             query=query,
             parameters=parameters,
             commit_tx=self._autocommit,
@@ -302,15 +299,12 @@ class AsyncCursor(BufferedCursor):
         self._raise_if_running()
         if self._tx_context is not None:
             self._stream = await self._execute_transactional_query(
-                query=query, parameters=parameters
+                tx_context=self._tx_context, query=query, parameters=parameters
             )
         else:
             self._stream = await self._execute_generic_query(
                 query=query, parameters=parameters
             )
-
-        if self._stream is None:
-            return
 
         self._begin_query()
 
