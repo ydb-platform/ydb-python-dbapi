@@ -30,7 +30,6 @@ class BaseDBApiTestSuit:
         cursor = connection.cursor()
         with suppress(dbapi.DatabaseError):
             maybe_await(cursor.execute("DROP TABLE foo"))
-
         cursor = connection.cursor()
         maybe_await(cursor.execute(
             "CREATE TABLE foo(id Int64 NOT NULL, PRIMARY KEY (id))"
@@ -38,21 +37,17 @@ class BaseDBApiTestSuit:
 
         connection.set_isolation_level(isolation_level)
         cursor = connection.cursor()
-
         query = "UPSERT INTO foo(id) VALUES (1)"
         if read_only:
             with pytest.raises(dbapi.DatabaseError):
                 maybe_await(cursor.execute(query))
-
         else:
             maybe_await(cursor.execute(query))
 
         maybe_await(connection.rollback())
 
         connection.set_isolation_level("AUTOCOMMIT")
-
         cursor = connection.cursor()
-
         maybe_await(cursor.execute("DROP TABLE foo"))
 
     def _test_connection(self, connection: dbapi.Connection) -> None:
@@ -211,7 +206,9 @@ class TestAsyncConnection(BaseDBApiTestSuit):
         try:
             yield conn
         finally:
-            await greenlet_spawn(conn.close)
+            def close() -> None:
+                maybe_await(conn.close())
+            await greenlet_spawn(close)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
