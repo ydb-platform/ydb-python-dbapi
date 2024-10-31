@@ -140,7 +140,7 @@ class BaseCursorTestSuit:
 class TestCursor(BaseCursorTestSuit):
     @pytest.fixture
     def sync_cursor(self, session_sync: ydb.QuerySession) -> Generator[Cursor]:
-        cursor = Cursor(session_sync)
+        cursor = Cursor(session_sync, ydb.QuerySerializableReadWrite())
         yield cursor
         cursor.close()
 
@@ -175,7 +175,7 @@ class TestAsyncCursor(BaseCursorTestSuit):
     async def async_cursor(
         self, session: ydb.aio.QuerySession
     ) -> AsyncGenerator[Cursor]:
-        cursor = AsyncCursor(session)
+        cursor = AsyncCursor(session, ydb.QuerySerializableReadWrite())
         yield cursor
         await greenlet_spawn(cursor.close)
 

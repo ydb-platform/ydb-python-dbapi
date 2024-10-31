@@ -42,14 +42,14 @@ _ydb_isolation_settings_map = {
         ydb.QuerySerializableReadWrite(), interactive=True
     ),
     IsolationLevel.ONLINE_READONLY: _IsolationSettings(
-        ydb.QueryOnlineReadOnly(), interactive=True
+        ydb.QueryOnlineReadOnly(), interactive=False
     ),
     IsolationLevel.ONLINE_READONLY_INCONSISTENT: _IsolationSettings(
         ydb.QueryOnlineReadOnly().with_allow_inconsistent_reads(),
-        interactive=True,
+        interactive=False,
     ),
     IsolationLevel.STALE_READONLY: _IsolationSettings(
-        ydb.QueryStaleReadOnly(), interactive=True
+        ydb.QueryStaleReadOnly(), interactive=False
     ),
     IsolationLevel.SNAPSHOT_READONLY: _IsolationSettings(
         ydb.QuerySnapshotReadOnly(), interactive=True
@@ -78,10 +78,11 @@ class BaseConnection:
 
         self.connection_kwargs: dict = kwargs
 
-        self._tx_mode: ydb.BaseQueryTxMode = ydb.QuerySerializableReadWrite()
-        self._tx_context: TxContext | AsyncTxContext | None = None
-        self.interactive_transaction: bool = False
         self._shared_session_pool: bool = False
+
+        self._tx_context: TxContext | AsyncTxContext | None = None
+        self._tx_mode: ydb.BaseQueryTxMode = ydb.QuerySerializableReadWrite()
+        self.interactive_transaction: bool = False
 
         if ydb_session_pool is not None:
             self._shared_session_pool = True
@@ -99,11 +100,13 @@ class BaseConnection:
         self._session: ydb.QuerySession | ydb.aio.QuerySession | None = None
 
     def set_isolation_level(self, isolation_level: IsolationLevel) -> None:
-        ydb_isolation_settings = _ydb_isolation_settings_map[isolation_level]
         if self._tx_context and self._tx_context.tx_id:
             raise InternalError(
                 "Failed to set transaction mode: transaction is already began"
             )
+
+        ydb_isolation_settings = _ydb_isolation_settings_map[isolation_level]
+
         self._tx_mode = ydb_isolation_settings.ydb_mode
         self.interactive_transaction = ydb_isolation_settings.interactive
 
@@ -113,7 +116,7 @@ class BaseConnection:
                 return IsolationLevel.SERIALIZABLE
             return IsolationLevel.AUTOCOMMIT
         if self._tx_mode.name == ydb.QueryOnlineReadOnly().name:
-            if self._tx_mode.settings.allow_inconsistent_reads:
+            if self._tx_mode.allow_inconsistent_reads:
                 return IsolationLevel.ONLINE_READONLY_INCONSISTENT
             return IsolationLevel.ONLINE_READONLY
         if self._tx_mode.name == ydb.QueryStaleReadOnly().name:
@@ -122,6 +125,12 @@ class BaseConnection:
             return IsolationLevel.SNAPSHOT_READONLY
         msg = f"{self._tx_mode.name} is not supported"
         raise NotSupportedError(msg)
+
+    def _maybe_init_tx(
+        self, session: ydb.QuerySession | ydb.aio.QuerySession
+    ) -> None:
+        if self._tx_context is None and self.interactive_transaction:
+            self._tx_context = session.transaction(self._tx_mode)
 
 
 class Connection(BaseConnection):
@@ -154,15 +163,12 @@ class Connection(BaseConnection):
         if self._session is None:
             raise RuntimeError("Connection is not ready, use wait_ready.")
 
-        if self.interactive_transaction:
-            self._tx_context = self._session.transaction(self._tx_mode)
-        else:
-            self._tx_context = None
+        self._maybe_init_tx(self._session)
 
         self._current_cursor = self._cursor_cls(
             session=self._session,
+            tx_mode=self._tx_mode,
             tx_context=self._tx_context,
-            autocommit=(not self.interactive_transaction),
         )
         return self._current_cursor
 
@@ -181,16 +187,19 @@ class Connection(BaseConnection):
 
         self._session = self._session_pool.acquire()
 
+    @handle_ydb_errors
     def commit(self) -> None:
         if self._tx_context and self._tx_context.tx_id:
             self._tx_context.commit()
             self._tx_context = None
 
+    @handle_ydb_errors
     def rollback(self) -> None:
         if self._tx_context and self._tx_context.tx_id:
             self._tx_context.rollback()
             self._tx_context = None
 
+    @handle_ydb_errors
     def close(self) -> None:
         self.rollback()
 
@@ -281,15 +290,12 @@ class AsyncConnection(BaseConnection):
         if self._session is None:
             raise RuntimeError("Connection is not ready, use wait_ready.")
 
-        if self.interactive_transaction:
-            self._tx_context = self._session.transaction(self._tx_mode)
-        else:
-            self._tx_context = None
+        self._maybe_init_tx(self._session)
 
         self._current_cursor = self._cursor_cls(
             session=self._session,
+            tx_mode=self._tx_mode,
             tx_context=self._tx_context,
-            autocommit=(not self.interactive_transaction),
         )
         return self._current_cursor
 
@@ -308,16 +314,19 @@ class AsyncConnection(BaseConnection):
 
         self._session = await self._session_pool.acquire()
 
+    @handle_ydb_errors
     async def commit(self) -> None:
         if self._tx_context and self._tx_context.tx_id:
             await self._tx_context.commit()
             self._tx_context = None
 
+    @handle_ydb_errors
     async def rollback(self) -> None:
         if self._tx_context and self._tx_context.tx_id:
             await self._tx_context.rollback()
             self._tx_context = None
 
+    @handle_ydb_errors
     async def close(self) -> None:
         await self.rollback()
 
