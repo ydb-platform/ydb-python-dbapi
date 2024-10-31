@@ -30,7 +30,7 @@ class IsolationLevel(str, Enum):
 
 
 class _IsolationSettings(NamedTuple):
-    ydb_mode: ydb.BaseQueryTxMode | None
+    ydb_mode: ydb.BaseQueryTxMode
     interactive: bool
 
 
@@ -187,16 +187,19 @@ class Connection(BaseConnection):
 
         self._session = self._session_pool.acquire()
 
+    @handle_ydb_errors
     def commit(self) -> None:
         if self._tx_context and self._tx_context.tx_id:
             self._tx_context.commit()
             self._tx_context = None
 
+    @handle_ydb_errors
     def rollback(self) -> None:
         if self._tx_context and self._tx_context.tx_id:
             self._tx_context.rollback()
             self._tx_context = None
 
+    @handle_ydb_errors
     def close(self) -> None:
         self.rollback()
 
@@ -311,16 +314,19 @@ class AsyncConnection(BaseConnection):
 
         self._session = await self._session_pool.acquire()
 
+    @handle_ydb_errors
     async def commit(self) -> None:
         if self._tx_context and self._tx_context.tx_id:
             await self._tx_context.commit()
             self._tx_context = None
 
+    @handle_ydb_errors
     async def rollback(self) -> None:
         if self._tx_context and self._tx_context.tx_id:
             await self._tx_context.rollback()
             self._tx_context = None
 
+    @handle_ydb_errors
     async def close(self) -> None:
         await self.rollback()
 
