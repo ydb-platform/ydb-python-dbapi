@@ -26,12 +26,10 @@ class BaseDBApiTestSuit:
         isolation_level: str,
         read_only: bool,
     ) -> None:
-        connection.set_isolation_level("AUTOCOMMIT")
         cursor = connection.cursor()
         with suppress(dbapi.DatabaseError):
-            maybe_await(cursor.execute("DROP TABLE foo"))
-        cursor = connection.cursor()
-        maybe_await(cursor.execute(
+            maybe_await(cursor.execute_scheme("DROP TABLE foo"))
+        maybe_await(cursor.execute_scheme(
             "CREATE TABLE foo(id Int64 NOT NULL, PRIMARY KEY (id))"
         ))
 
@@ -46,9 +44,7 @@ class BaseDBApiTestSuit:
 
         maybe_await(connection.rollback())
 
-        connection.set_isolation_level("AUTOCOMMIT")
-        cursor = connection.cursor()
-        maybe_await(cursor.execute("DROP TABLE foo"))
+        maybe_await(cursor.execute_scheme("DROP TABLE foo"))
 
     def _test_connection(self, connection: dbapi.Connection) -> None:
         maybe_await(connection.commit())
@@ -56,13 +52,13 @@ class BaseDBApiTestSuit:
 
         cur = connection.cursor()
         with suppress(dbapi.DatabaseError):
-            maybe_await(cur.execute("DROP TABLE foo"))
+            maybe_await(cur.execute_scheme("DROP TABLE foo"))
 
         assert not maybe_await(connection.check_exists("/local/foo"))
         with pytest.raises(dbapi.ProgrammingError):
             maybe_await(connection.describe("/local/foo"))
 
-        maybe_await(cur.execute(
+        maybe_await(cur.execute_scheme(
             "CREATE TABLE foo(id Int64 NOT NULL, PRIMARY KEY (id))"
         ))
 
@@ -72,7 +68,7 @@ class BaseDBApiTestSuit:
         assert col.name == "id"
         assert col.type == ydb.PrimitiveType.Int64
 
-        maybe_await(cur.execute("DROP TABLE foo"))
+        maybe_await(cur.execute_scheme("DROP TABLE foo"))
         maybe_await(cur.close())
 
     def _test_cursor_raw_query(self, connection: dbapi.Connection) -> None:
@@ -80,9 +76,9 @@ class BaseDBApiTestSuit:
         assert cur
 
         with suppress(dbapi.DatabaseError):
-            maybe_await(cur.execute("DROP TABLE test"))
+            maybe_await(cur.execute_scheme("DROP TABLE test"))
 
-        maybe_await(cur.execute(
+        maybe_await(cur.execute_scheme(
             "CREATE TABLE test(id Int64 NOT NULL, text Utf8, PRIMARY KEY (id))"
         ))
 
@@ -107,7 +103,7 @@ class BaseDBApiTestSuit:
             },
         ))
 
-        maybe_await(cur.execute("DROP TABLE test"))
+        maybe_await(cur.execute_scheme("DROP TABLE test"))
 
         maybe_await(cur.close())
 
@@ -125,7 +121,7 @@ class BaseDBApiTestSuit:
         cur = connection.cursor()
 
         with suppress(dbapi.DatabaseError):
-            maybe_await(cur.execute("DROP TABLE test"))
+            maybe_await(cur.execute_scheme("DROP TABLE test"))
 
         with pytest.raises(dbapi.DataError):
             maybe_await(cur.execute("SELECT 18446744073709551616"))
@@ -139,7 +135,7 @@ class BaseDBApiTestSuit:
         with pytest.raises(dbapi.ProgrammingError):
             maybe_await(cur.execute("SELECT * FROM test"))
 
-        maybe_await(cur.execute(
+        maybe_await(cur.execute_scheme(
             "CREATE TABLE test(id Int64, PRIMARY KEY (id))"
         ))
 
@@ -148,7 +144,7 @@ class BaseDBApiTestSuit:
         with pytest.raises(dbapi.IntegrityError):
             maybe_await(cur.execute("INSERT INTO test(id) VALUES(1)"))
 
-        maybe_await(cur.execute("DROP TABLE test"))
+        maybe_await(cur.execute_scheme("DROP TABLE test"))
         maybe_await(cur.close())
 
 

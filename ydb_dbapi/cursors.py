@@ -4,6 +4,7 @@ import itertools
 from collections.abc import AsyncIterator
 from collections.abc import Generator
 from collections.abc import Iterator
+from collections.abc import Sequence
 from typing import Any
 from typing import Union
 
@@ -138,15 +139,15 @@ class Cursor(BufferedCursor):
     def __init__(
         self,
         session: ydb.QuerySession,
+        tx_mode: ydb.BaseQueryTxMode,
         tx_context: ydb.QueryTxContext | None = None,
         table_path_prefix: str = "",
-        autocommit: bool = True,
     ) -> None:
         super().__init__()
         self._session = session
+        self._tx_mode = tx_mode
         self._tx_context = tx_context
         self._table_path_prefix = table_path_prefix
-        self._autocommit = autocommit
 
         self._stream: Iterator | None = None
 
@@ -167,6 +168,18 @@ class Cursor(BufferedCursor):
         return self._session.execute(query=query, parameters=parameters)
 
     @handle_ydb_errors
+    def _execute_session_query(
+        self,
+        query: str,
+        parameters: ParametersType | None = None,
+    ) -> Iterator[ydb.convert.ResultSet]:
+        return self._session.transaction(self._tx_mode).execute(
+            query=query,
+            parameters=parameters,
+            commit_tx=True,
+        )
+
+    @handle_ydb_errors
     def _execute_transactional_query(
         self,
         tx_context: ydb.QueryTxContext,
@@ -176,8 +189,21 @@ class Cursor(BufferedCursor):
         return tx_context.execute(
             query=query,
             parameters=parameters,
-            commit_tx=self._autocommit,
+            commit_tx=False,
         )
+
+    def execute_scheme(
+        self,
+        query: str,
+        parameters: ParametersType | None = None,
+    ) -> None:
+        self._raise_if_closed()
+
+        self._stream = self._execute_generic_query(
+            query=query, parameters=parameters
+        )
+        self._begin_query()
+        self._scroll_stream(replace_current=False)
 
     def execute(
         self,
@@ -191,16 +217,18 @@ class Cursor(BufferedCursor):
                 tx_context=self._tx_context, query=query, parameters=parameters
             )
         else:
-            self._stream = self._execute_generic_query(
+            self._stream = self._execute_session_query(
                 query=query, parameters=parameters
             )
 
         self._begin_query()
-
         self._scroll_stream(replace_current=False)
 
-    async def executemany(self) -> None:
-        pass
+    def executemany(
+        self, query: str, seq_of_parameters: Sequence[ParametersType]
+    ) -> None:
+        for parameters in seq_of_parameters:
+            self.execute(query, parameters)
 
     @handle_ydb_errors
     def nextset(self, replace_current: bool = True) -> bool:
@@ -249,15 +277,15 @@ class AsyncCursor(BufferedCursor):
     def __init__(
         self,
         session: ydb.aio.QuerySession,
+        tx_mode: ydb.BaseQueryTxMode,
         tx_context: ydb.aio.QueryTxContext | None = None,
         table_path_prefix: str = "",
-        autocommit: bool = True,
     ) -> None:
         super().__init__()
         self._session = session
+        self._tx_mode = tx_mode
         self._tx_context = tx_context
         self._table_path_prefix = table_path_prefix
-        self._autocommit = autocommit
 
         self._stream: AsyncIterator | None = None
 
@@ -278,6 +306,18 @@ class AsyncCursor(BufferedCursor):
         return await self._session.execute(query=query, parameters=parameters)
 
     @handle_ydb_errors
+    async def _execute_session_query(
+        self,
+        query: str,
+        parameters: ParametersType | None = None,
+    ) -> AsyncIterator[ydb.convert.ResultSet]:
+        return await self._session.transaction(self._tx_mode).execute(
+            query=query,
+            parameters=parameters,
+            commit_tx=True,
+        )
+
+    @handle_ydb_errors
     async def _execute_transactional_query(
         self,
         tx_context: ydb.aio.QueryTxContext,
@@ -287,8 +327,21 @@ class AsyncCursor(BufferedCursor):
         return await tx_context.execute(
             query=query,
             parameters=parameters,
-            commit_tx=self._autocommit,
+            commit_tx=False,
         )
+
+    async def execute_scheme(
+        self,
+        query: str,
+        parameters: ParametersType | None = None,
+    ) -> None:
+        self._raise_if_closed()
+
+        self._stream = await self._execute_generic_query(
+            query=query, parameters=parameters
+        )
+        self._begin_query()
+        await self._scroll_stream(replace_current=False)
 
     async def execute(
         self,
@@ -302,16 +355,18 @@ class AsyncCursor(BufferedCursor):
                 tx_context=self._tx_context, query=query, parameters=parameters
             )
         else:
-            self._stream = await self._execute_generic_query(
+            self._stream = await self._execute_session_query(
                 query=query, parameters=parameters
             )
 
         self._begin_query()
-
         await self._scroll_stream(replace_current=False)
 
-    async def executemany(self) -> None:
-        pass
+    async def executemany(
+        self, query: str, seq_of_parameters: Sequence[ParametersType]
+    ) -> None:
+        for parameters in seq_of_parameters:
+            await self.execute(query, parameters)
 
     @handle_ydb_errors
     async def nextset(self, replace_current: bool = True) -> bool:

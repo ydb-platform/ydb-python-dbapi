@@ -35,7 +35,9 @@ class _IsolationSettings(NamedTuple):
 
 
 _ydb_isolation_settings_map = {
-    IsolationLevel.AUTOCOMMIT: _IsolationSettings(None, interactive=False),
+    IsolationLevel.AUTOCOMMIT: _IsolationSettings(
+        ydb.QuerySerializableReadWrite(), interactive=False
+    ),
     IsolationLevel.SERIALIZABLE: _IsolationSettings(
         ydb.QuerySerializableReadWrite(), interactive=True
     ),
@@ -79,7 +81,7 @@ class BaseConnection:
         self._shared_session_pool: bool = False
 
         self._tx_context: TxContext | AsyncTxContext | None = None
-        self._tx_mode: ydb.BaseQueryTxMode | None = None
+        self._tx_mode: ydb.BaseQueryTxMode = ydb.QuerySerializableReadWrite()
         self.interactive_transaction: bool = False
 
         if ydb_session_pool is not None:
@@ -105,15 +107,14 @@ class BaseConnection:
 
         ydb_isolation_settings = _ydb_isolation_settings_map[isolation_level]
 
-        self._tx_context = None
         self._tx_mode = ydb_isolation_settings.ydb_mode
         self.interactive_transaction = ydb_isolation_settings.interactive
 
     def get_isolation_level(self) -> str:
-        if self._tx_mode is None:
-            return IsolationLevel.AUTOCOMMIT
         if self._tx_mode.name == ydb.QuerySerializableReadWrite().name:
-            return IsolationLevel.SERIALIZABLE
+            if self.interactive_transaction:
+                return IsolationLevel.SERIALIZABLE
+            return IsolationLevel.AUTOCOMMIT
         if self._tx_mode.name == ydb.QueryOnlineReadOnly().name:
             if self._tx_mode.allow_inconsistent_reads:
                 return IsolationLevel.ONLINE_READONLY_INCONSISTENT
@@ -128,7 +129,7 @@ class BaseConnection:
     def _maybe_init_tx(
         self, session: ydb.QuerySession | ydb.aio.QuerySession
     ) -> None:
-        if self._tx_context is None and self._tx_mode is not None:
+        if self._tx_context is None and self.interactive_transaction:
             self._tx_context = session.transaction(self._tx_mode)
 
 
@@ -166,8 +167,8 @@ class Connection(BaseConnection):
 
         self._current_cursor = self._cursor_cls(
             session=self._session,
+            tx_mode=self._tx_mode,
             tx_context=self._tx_context,
-            autocommit=(not self.interactive_transaction),
         )
         return self._current_cursor
 
@@ -290,8 +291,8 @@ class AsyncConnection(BaseConnection):
 
         self._current_cursor = self._cursor_cls(
             session=self._session,
+            tx_mode=self._tx_mode,
             tx_context=self._tx_context,
-            autocommit=(not self.interactive_transaction),
         )
         return self._current_cursor
 
