@@ -1,3 +1,4 @@
+## 0.0.1b4 ##
 * Add table prefix pragma to queries
 
 ## 0.0.1b3 ##
