@@ -1,3 +1,5 @@
+* Add pool retries on execute calls
+
 ## 0.0.1b2 ##
 * Fix tx modes
 * Fix missing await in async connection
