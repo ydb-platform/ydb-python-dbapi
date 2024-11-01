@@ -1,3 +1,5 @@
+* Add table prefix pragma to queries
+
 ## 0.0.1b3 ##
 * Add pool retries on execute calls
 
