@@ -1,3 +1,4 @@
+## 0.0.1b3 ##
 * Add pool retries on execute calls
 
 ## 0.0.1b2 ##
