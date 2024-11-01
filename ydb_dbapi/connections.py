@@ -385,7 +385,7 @@ class AsyncConnection(BaseConnection):
             if child.is_table():
                 result.append(child_abs_path)
             elif child.is_directory() and not child.name.startswith("."):
-                result.extend(self.get_table_names(child_abs_path))
+                result.extend(await self.get_table_names(child_abs_path))
         return result
 
 
