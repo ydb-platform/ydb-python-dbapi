@@ -39,6 +39,8 @@ class BufferedCursor:
         self._description: list[tuple] | None = None
         self._state: CursorStatus = CursorStatus.ready
 
+        self._table_path_prefix: str = ""
+
     @property
     def description(self) -> list[tuple] | None:
         return self._description
@@ -134,6 +136,12 @@ class BufferedCursor:
         self._raise_if_closed()
         return list(self._rows or iter([]))
 
+    def _append_table_path_prefix(self, query: str) -> str:
+        if self._table_path_prefix:
+            prgm = f'PRAGMA TablePathPrefix = "{self._table_path_prefix}";\n'
+            return prgm + query
+        return query
+
 
 class Cursor(BufferedCursor):
     def __init__(
@@ -225,6 +233,9 @@ class Cursor(BufferedCursor):
     ) -> None:
         self._raise_if_closed()
         self._raise_if_running()
+
+        query = self._append_table_path_prefix(query)
+
         if self._tx_context is not None:
             self._stream = self._execute_transactional_query(
                 tx_context=self._tx_context, query=query, parameters=parameters
@@ -376,6 +387,9 @@ class AsyncCursor(BufferedCursor):
     ) -> None:
         self._raise_if_closed()
         self._raise_if_running()
+
+        query = self._append_table_path_prefix(query)
+
         if self._tx_context is not None:
             self._stream = await self._execute_transactional_query(
                 tx_context=self._tx_context, query=query, parameters=parameters
