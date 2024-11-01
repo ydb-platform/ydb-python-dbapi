@@ -138,13 +138,13 @@ class BufferedCursor:
 class Cursor(BufferedCursor):
     def __init__(
         self,
-        session: ydb.QuerySession,
+        session_pool: ydb.QuerySessionPool,
         tx_mode: ydb.BaseQueryTxMode,
         tx_context: ydb.QueryTxContext | None = None,
         table_path_prefix: str = "",
     ) -> None:
         super().__init__()
-        self._session = session
+        self._session_pool = session_pool
         self._tx_mode = tx_mode
         self._tx_context = tx_context
         self._table_path_prefix = table_path_prefix
@@ -165,7 +165,15 @@ class Cursor(BufferedCursor):
     def _execute_generic_query(
         self, query: str, parameters: ParametersType | None = None
     ) -> Iterator[ydb.convert.ResultSet]:
-        return self._session.execute(query=query, parameters=parameters)
+        def callee(
+            session: ydb.QuerySession,
+        ) -> Iterator[ydb.convert.ResultSet]:
+            return session.execute(
+                query=query,
+                parameters=parameters,
+            )
+
+        return self._session_pool.retry_operation_sync(callee)
 
     @handle_ydb_errors
     def _execute_session_query(
@@ -173,11 +181,16 @@ class Cursor(BufferedCursor):
         query: str,
         parameters: ParametersType | None = None,
     ) -> Iterator[ydb.convert.ResultSet]:
-        return self._session.transaction(self._tx_mode).execute(
-            query=query,
-            parameters=parameters,
-            commit_tx=True,
-        )
+        def callee(
+            session: ydb.QuerySession,
+        ) -> Iterator[ydb.convert.ResultSet]:
+            return session.transaction(self._tx_mode).execute(
+                query=query,
+                parameters=parameters,
+                commit_tx=True,
+            )
+
+        return self._session_pool.retry_operation_sync(callee)
 
     @handle_ydb_errors
     def _execute_transactional_query(
@@ -276,13 +289,13 @@ class Cursor(BufferedCursor):
 class AsyncCursor(BufferedCursor):
     def __init__(
         self,
-        session: ydb.aio.QuerySession,
+        session_pool: ydb.aio.QuerySessionPool,
         tx_mode: ydb.BaseQueryTxMode,
         tx_context: ydb.aio.QueryTxContext | None = None,
         table_path_prefix: str = "",
     ) -> None:
         super().__init__()
-        self._session = session
+        self._session_pool = session_pool
         self._tx_mode = tx_mode
         self._tx_context = tx_context
         self._table_path_prefix = table_path_prefix
@@ -303,7 +316,15 @@ class AsyncCursor(BufferedCursor):
     async def _execute_generic_query(
         self, query: str, parameters: ParametersType | None = None
     ) -> AsyncIterator[ydb.convert.ResultSet]:
-        return await self._session.execute(query=query, parameters=parameters)
+        async def callee(
+            session: ydb.aio.QuerySession,
+        ) -> AsyncIterator[ydb.convert.ResultSet]:
+            return await session.execute(
+                query=query,
+                parameters=parameters,
+            )
+
+        return await self._session_pool.retry_operation_async(callee)
 
     @handle_ydb_errors
     async def _execute_session_query(
@@ -311,11 +332,16 @@ class AsyncCursor(BufferedCursor):
         query: str,
         parameters: ParametersType | None = None,
     ) -> AsyncIterator[ydb.convert.ResultSet]:
-        return await self._session.transaction(self._tx_mode).execute(
-            query=query,
-            parameters=parameters,
-            commit_tx=True,
-        )
+        async def callee(
+            session: ydb.aio.QuerySession,
+        ) -> AsyncIterator[ydb.convert.ResultSet]:
+            return await session.transaction(self._tx_mode).execute(
+                query=query,
+                parameters=parameters,
+                commit_tx=True,
+            )
+
+        return await self._session_pool.retry_operation_async(callee)
 
     @handle_ydb_errors
     async def _execute_transactional_query(

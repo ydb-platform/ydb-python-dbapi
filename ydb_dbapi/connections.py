@@ -87,12 +87,15 @@ class BaseConnection:
         if ydb_session_pool is not None:
             self._shared_session_pool = True
             self._session_pool = ydb_session_pool
+            settings = self._get_client_settings()
+            self._session_pool._query_client_settings = settings
             self._driver = self._session_pool._driver
         else:
             driver_config = ydb.DriverConfig(
                 endpoint=self.endpoint,
                 database=self.database,
                 credentials=self.credentials,
+                query_client_settings=self._get_client_settings(),
             )
             self._driver = self._driver_cls(driver_config)
             self._session_pool = self._pool_cls(self._driver, size=5)
@@ -126,11 +129,15 @@ class BaseConnection:
         msg = f"{self._tx_mode.name} is not supported"
         raise NotSupportedError(msg)
 
-    def _maybe_init_tx(
-        self, session: ydb.QuerySession | ydb.aio.QuerySession
-    ) -> None:
-        if self._tx_context is None and self.interactive_transaction:
-            self._tx_context = session.transaction(self._tx_mode)
+    def _get_client_settings(self) -> ydb.QueryClientSettings:
+        return (
+            ydb.QueryClientSettings()
+            .with_native_date_in_result_sets(True)
+            .with_native_datetime_in_result_sets(True)
+            .with_native_timestamp_in_result_sets(True)
+            .with_native_interval_in_result_sets(True)
+            .with_native_json_in_result_sets(False)
+        )
 
 
 class Connection(BaseConnection):
@@ -160,17 +167,11 @@ class Connection(BaseConnection):
         self._current_cursor: Cursor | None = None
 
     def cursor(self) -> Cursor:
-        if self._session is None:
-            raise RuntimeError("Connection is not ready, use wait_ready.")
-
-        self._maybe_init_tx(self._session)
-
-        self._current_cursor = self._cursor_cls(
-            session=self._session,
+        return self._cursor_cls(
+            session_pool=self._session_pool,
             tx_mode=self._tx_mode,
             tx_context=self._tx_context,
         )
-        return self._current_cursor
 
     def wait_ready(self, timeout: int = 10) -> None:
         try:
@@ -185,26 +186,32 @@ class Connection(BaseConnection):
             )
             raise InterfaceError(msg) from e
 
-        self._session = self._session_pool.acquire()
+    @handle_ydb_errors
+    def begin(self) -> None:
+        self._tx_context = None
+        if self.interactive_transaction:
+            self._session = self._session_pool.acquire()
+            self._tx_context = self._session.transaction(self._tx_mode)
 
     @handle_ydb_errors
     def commit(self) -> None:
         if self._tx_context and self._tx_context.tx_id:
             self._tx_context.commit()
+            self._session_pool.release(self._session)
             self._tx_context = None
+            self._session = None
 
     @handle_ydb_errors
     def rollback(self) -> None:
         if self._tx_context and self._tx_context.tx_id:
             self._tx_context.rollback()
+            self._session_pool.release(self._session)
             self._tx_context = None
+            self._session = None
 
     @handle_ydb_errors
     def close(self) -> None:
         self.rollback()
-
-        if self._current_cursor:
-            self._current_cursor.close()
 
         if self._session:
             self._session_pool.release(self._session)
@@ -287,17 +294,11 @@ class AsyncConnection(BaseConnection):
         self._current_cursor: AsyncCursor | None = None
 
     def cursor(self) -> AsyncCursor:
-        if self._session is None:
-            raise RuntimeError("Connection is not ready, use wait_ready.")
-
-        self._maybe_init_tx(self._session)
-
-        self._current_cursor = self._cursor_cls(
-            session=self._session,
+        return self._cursor_cls(
+            session_pool=self._session_pool,
             tx_mode=self._tx_mode,
             tx_context=self._tx_context,
         )
-        return self._current_cursor
 
     async def wait_ready(self, timeout: int = 10) -> None:
         try:
@@ -312,26 +313,32 @@ class AsyncConnection(BaseConnection):
             )
             raise InterfaceError(msg) from e
 
-        self._session = await self._session_pool.acquire()
+    @handle_ydb_errors
+    async def begin(self) -> None:
+        self._tx_context = None
+        if self.interactive_transaction:
+            self._session = await self._session_pool.acquire()
+            self._tx_context = self._session.transaction(self._tx_mode)
 
     @handle_ydb_errors
     async def commit(self) -> None:
-        if self._tx_context and self._tx_context.tx_id:
+        if self._session and self._tx_context and self._tx_context.tx_id:
             await self._tx_context.commit()
+            await self._session_pool.release(self._session)
+            self._session = None
             self._tx_context = None
 
     @handle_ydb_errors
     async def rollback(self) -> None:
-        if self._tx_context and self._tx_context.tx_id:
+        if self._session and self._tx_context and self._tx_context.tx_id:
             await self._tx_context.rollback()
+            await self._session_pool.release(self._session)
+            self._session = None
             self._tx_context = None
 
     @handle_ydb_errors
     async def close(self) -> None:
         await self.rollback()
-
-        if self._current_cursor:
-            await self._current_cursor.close()
 
         if self._session:
             await self._session_pool.release(self._session)

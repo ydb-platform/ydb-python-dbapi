@@ -35,6 +35,8 @@ class BaseDBApiTestSuit:
 
         connection.set_isolation_level(isolation_level)
         cursor = connection.cursor()
+        maybe_await(connection.begin())
+
         query = "UPSERT INTO foo(id) VALUES (1)"
         if read_only:
             with pytest.raises(dbapi.DatabaseError):
