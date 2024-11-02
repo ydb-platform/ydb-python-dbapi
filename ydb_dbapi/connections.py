@@ -18,6 +18,7 @@ from .errors import InterfaceError
 from .errors import InternalError
 from .errors import NotSupportedError
 from .utils import handle_ydb_errors
+from .utils import maybe_get_current_trace_id
 
 
 class IsolationLevel(str, Enum):
@@ -101,6 +102,9 @@ class BaseConnection:
             self._session_pool = self._pool_cls(self._driver, size=5)
 
         self._session: ydb.QuerySession | ydb.aio.QuerySession | None = None
+        self.request_settings: ydb.BaseRequestSettings = (
+            ydb.BaseRequestSettings()
+        )
 
     def set_isolation_level(self, isolation_level: IsolationLevel) -> None:
         if self._tx_context and self._tx_context.tx_id:
@@ -128,6 +132,20 @@ class BaseConnection:
             return IsolationLevel.SNAPSHOT_READONLY
         msg = f"{self._tx_mode.name} is not supported"
         raise NotSupportedError(msg)
+
+    def set_ydb_request_settings(self, value: ydb.BaseRequestSettings) -> None:
+        self.request_settings = value
+
+    def get_ydb_request_settings(self) -> ydb.BaseRequestSettings:
+        return self.request_settings
+
+    def _get_request_settings(self) -> ydb.BaseRequestSettings:
+        settings = self.request_settings.make_copy()
+
+        if self.request_settings.trace_id is None:
+            settings = settings.with_trace_id(maybe_get_current_trace_id())
+
+        return settings
 
     def _get_client_settings(self) -> ydb.QueryClientSettings:
         return (
@@ -172,6 +190,7 @@ class Connection(BaseConnection):
             tx_mode=self._tx_mode,
             tx_context=self._tx_context,
             table_path_prefix=self.table_path_prefix,
+            request_settings=self.request_settings,
         )
 
     def wait_ready(self, timeout: int = 10) -> None:
@@ -197,7 +216,8 @@ class Connection(BaseConnection):
     @handle_ydb_errors
     def commit(self) -> None:
         if self._tx_context and self._tx_context.tx_id:
-            self._tx_context.commit()
+            settings = self._get_request_settings()
+            self._tx_context.commit(settings=settings)
             self._session_pool.release(self._session)
             self._tx_context = None
             self._session = None
@@ -205,7 +225,8 @@ class Connection(BaseConnection):
     @handle_ydb_errors
     def rollback(self) -> None:
         if self._tx_context and self._tx_context.tx_id:
-            self._tx_context.rollback()
+            settings = self._get_request_settings()
+            self._tx_context.rollback(settings=settings)
             self._session_pool.release(self._session)
             self._tx_context = None
             self._session = None
@@ -223,10 +244,15 @@ class Connection(BaseConnection):
 
     @handle_ydb_errors
     def describe(self, table_path: str) -> ydb.TableSchemeEntry:
+        settings = self._get_request_settings()
+
         abs_table_path = posixpath.join(
             self.database, self.table_path_prefix, table_path
         )
-        return self._driver.table_client.describe_table(abs_table_path)
+        return self._driver.table_client.describe_table(
+            abs_table_path,
+            settings=settings,
+        )
 
     @handle_ydb_errors
     def check_exists(self, table_path: str) -> bool:
@@ -243,9 +269,12 @@ class Connection(BaseConnection):
 
     def _check_path_exists(self, table_path: str) -> bool:
         try:
+            settings = self._get_request_settings()
 
             def callee() -> None:
-                self._driver.scheme_client.describe_path(table_path)
+                self._driver.scheme_client.describe_path(
+                    table_path, settings=settings
+                )
 
             retry_operation_sync(callee)
         except ydb.SchemeError:
@@ -254,8 +283,13 @@ class Connection(BaseConnection):
             return True
 
     def _get_table_names(self, abs_dir_path: str) -> list[str]:
+        settings = self._get_request_settings()
+
         def callee() -> ydb.Directory:
-            return self._driver.scheme_client.list_directory(abs_dir_path)
+            return self._driver.scheme_client.list_directory(
+                abs_dir_path,
+                settings=settings,
+            )
 
         directory = retry_operation_sync(callee)
         result = []
@@ -300,6 +334,7 @@ class AsyncConnection(BaseConnection):
             tx_mode=self._tx_mode,
             tx_context=self._tx_context,
             table_path_prefix=self.table_path_prefix,
+            request_settings=self.request_settings,
         )
 
     async def wait_ready(self, timeout: int = 10) -> None:
@@ -325,7 +360,8 @@ class AsyncConnection(BaseConnection):
     @handle_ydb_errors
     async def commit(self) -> None:
         if self._session and self._tx_context and self._tx_context.tx_id:
-            await self._tx_context.commit()
+            settings = self._get_request_settings()
+            await self._tx_context.commit(settings=settings)
             await self._session_pool.release(self._session)
             self._session = None
             self._tx_context = None
@@ -333,7 +369,8 @@ class AsyncConnection(BaseConnection):
     @handle_ydb_errors
     async def rollback(self) -> None:
         if self._session and self._tx_context and self._tx_context.tx_id:
-            await self._tx_context.rollback()
+            settings = self._get_request_settings()
+            await self._tx_context.rollback(settings=settings)
             await self._session_pool.release(self._session)
             self._session = None
             self._tx_context = None
@@ -351,10 +388,15 @@ class AsyncConnection(BaseConnection):
 
     @handle_ydb_errors
     async def describe(self, table_path: str) -> ydb.TableSchemeEntry:
+        settings = self._get_request_settings()
+
         abs_table_path = posixpath.join(
             self.database, self.table_path_prefix, table_path
         )
-        return await self._driver.table_client.describe_table(abs_table_path)
+        return await self._driver.table_client.describe_table(
+            abs_table_path,
+            settings=settings,
+        )
 
     @handle_ydb_errors
     async def check_exists(self, table_path: str) -> bool:
@@ -371,9 +413,13 @@ class AsyncConnection(BaseConnection):
 
     async def _check_path_exists(self, table_path: str) -> bool:
         try:
+            settings = self._get_request_settings()
 
             async def callee() -> None:
-                await self._driver.scheme_client.describe_path(table_path)
+                await self._driver.scheme_client.describe_path(
+                    table_path,
+                    settings=settings,
+                )
 
             await retry_operation_async(callee)
         except ydb.SchemeError:
@@ -382,9 +428,12 @@ class AsyncConnection(BaseConnection):
             return True
 
     async def _get_table_names(self, abs_dir_path: str) -> list[str]:
+        settings = self._get_request_settings()
+
         async def callee() -> ydb.Directory:
             return await self._driver.scheme_client.list_directory(
-                abs_dir_path
+                abs_dir_path,
+                settings=settings,
             )
 
         directory = await retry_operation_async(callee)

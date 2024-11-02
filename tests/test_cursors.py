@@ -142,7 +142,11 @@ class TestCursor(BaseCursorTestSuit):
     def sync_cursor(
         self, session_pool_sync: ydb.QuerySessionPool
     ) -> Generator[Cursor]:
-        cursor = Cursor(session_pool_sync, ydb.QuerySerializableReadWrite())
+        cursor = Cursor(
+            session_pool_sync,
+            ydb.QuerySerializableReadWrite(),
+            request_settings=ydb.BaseRequestSettings(),
+        )
         yield cursor
         cursor.close()
 
@@ -177,7 +181,11 @@ class TestAsyncCursor(BaseCursorTestSuit):
     async def async_cursor(
         self, session_pool: ydb.aio.QuerySessionPool
     ) -> AsyncGenerator[Cursor]:
-        cursor = AsyncCursor(session_pool, ydb.QuerySerializableReadWrite())
+        cursor = AsyncCursor(
+            session_pool,
+            ydb.QuerySerializableReadWrite(),
+            request_settings=ydb.BaseRequestSettings(),
+        )
         yield cursor
         await greenlet_spawn(cursor.close)
 
