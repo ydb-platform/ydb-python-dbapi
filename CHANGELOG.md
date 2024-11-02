@@ -1,3 +1,5 @@
+* Add missing param to cursor constructor
+
 ## 0.0.1b6 ##
 * Fix get_table_names connection method
 
