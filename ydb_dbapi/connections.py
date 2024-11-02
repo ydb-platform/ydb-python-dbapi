@@ -171,6 +171,7 @@ class Connection(BaseConnection):
             session_pool=self._session_pool,
             tx_mode=self._tx_mode,
             tx_context=self._tx_context,
+            table_path_prefix=self.table_path_prefix,
         )
 
     def wait_ready(self, timeout: int = 10) -> None:
@@ -298,6 +299,7 @@ class AsyncConnection(BaseConnection):
             session_pool=self._session_pool,
             tx_mode=self._tx_mode,
             tx_context=self._tx_context,
+            table_path_prefix=self.table_path_prefix,
         )
 
     async def wait_ready(self, timeout: int = 10) -> None:
