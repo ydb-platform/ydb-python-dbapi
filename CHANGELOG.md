@@ -1,3 +1,5 @@
+* Cherry pick settings propagation
+
 ## 0.0.1b7 ##
 * Add missing param to cursor constructor
 
