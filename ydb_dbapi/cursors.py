@@ -220,6 +220,8 @@ class Cursor(BufferedCursor):
     ) -> None:
         self._raise_if_closed()
 
+        query = self._append_table_path_prefix(query)
+
         self._stream = self._execute_generic_query(
             query=query, parameters=parameters
         )
@@ -373,6 +375,8 @@ class AsyncCursor(BufferedCursor):
         parameters: ParametersType | None = None,
     ) -> None:
         self._raise_if_closed()
+
+        query = self._append_table_path_prefix(query)
 
         self._stream = await self._execute_generic_query(
             query=query, parameters=parameters
