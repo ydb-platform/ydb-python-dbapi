@@ -1,3 +1,5 @@
+* Add prefix pragma to scheme queries
+
 ## 0.0.1b4 ##
 * Add table prefix pragma to queries
 
