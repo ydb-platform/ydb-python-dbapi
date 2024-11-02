@@ -1,3 +1,4 @@
+## 0.0.1b8 ##
 * Cherry pick settings propagation
 
 ## 0.0.1b7 ##
