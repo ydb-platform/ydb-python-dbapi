@@ -1,3 +1,4 @@
+## 0.0.1b7 ##
 * Add missing param to cursor constructor
 
 ## 0.0.1b6 ##
