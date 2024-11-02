@@ -1,3 +1,5 @@
+* Fix get_table_names connection method
+
 ## 0.0.1b5 ##
 * Add prefix pragma to scheme queries
 
