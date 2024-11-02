@@ -1,3 +1,4 @@
+## 0.0.1b6 ##
 * Fix get_table_names connection method
 
 ## 0.0.1b5 ##
