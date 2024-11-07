@@ -149,6 +149,57 @@ class BaseDBApiTestSuit:
         maybe_await(cur.execute_scheme("DROP TABLE test"))
         maybe_await(cur.close())
 
+    def _test_bulk_upsert(self, connection: dbapi.Connection) -> None:
+        cursor = connection.cursor()
+        with suppress(dbapi.DatabaseError):
+            maybe_await(cursor.execute_scheme("DROP TABLE pet"))
+
+        maybe_await(cursor.execute_scheme(
+            """
+            CREATE TABLE pet (
+            pet_id INT,
+            name TEXT NOT NULL,
+            pet_type TEXT NOT NULL,
+            birth_date TEXT NOT NULL,
+            owner TEXT NOT NULL,
+            PRIMARY KEY (pet_id)
+            );
+            """
+        ))
+
+        column_types = (
+            ydb.BulkUpsertColumns()
+            .add_column("pet_id", ydb.OptionalType(ydb.PrimitiveType.Int32))
+            .add_column("name", ydb.PrimitiveType.Utf8)
+            .add_column("pet_type", ydb.PrimitiveType.Utf8)
+            .add_column("birth_date", ydb.PrimitiveType.Utf8)
+            .add_column("owner", ydb.PrimitiveType.Utf8)
+        )
+
+        rows = [
+            {
+                "pet_id": 3,
+                "name": "Lester",
+                "pet_type": "Hamster",
+                "birth_date": "2020-06-23",
+                "owner": "Lily"
+            },
+            {
+                "pet_id": 4,
+                "name": "Quincy",
+                "pet_type": "Parrot",
+                "birth_date": "2013-08-11",
+                "owner": "Anne"
+            },
+        ]
+
+        maybe_await(connection.bulk_upsert("pet", rows, column_types))
+
+        maybe_await(cursor.execute("SELECT * FROM pet"))
+        assert cursor.rowcount == 2
+
+        maybe_await(cursor.execute_scheme("DROP TABLE pet"))
+
 
 class TestConnection(BaseDBApiTestSuit):
     @pytest.fixture
@@ -190,6 +241,9 @@ class TestConnection(BaseDBApiTestSuit):
 
     def test_errors(self, connection: dbapi.Connection) -> None:
         self._test_errors(connection)
+
+    def test_bulk_upsert(self, connection: dbapi.Connection) -> None:
+        self._test_bulk_upsert(connection)
 
 
 class TestAsyncConnection(BaseDBApiTestSuit):
@@ -244,3 +298,9 @@ class TestAsyncConnection(BaseDBApiTestSuit):
     @pytest.mark.asyncio
     async def test_errors(self, connection: dbapi.AsyncConnection) -> None:
         await greenlet_spawn(self._test_errors, connection)
+
+    @pytest.mark.asyncio
+    async def test_bulk_upsert(
+        self, connection: dbapi.AsyncConnection
+    ) -> None:
+        await greenlet_spawn(self._test_bulk_upsert, connection)

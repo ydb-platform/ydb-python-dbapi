@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import posixpath
+from collections.abc import Sequence
 from enum import Enum
 from typing import NamedTuple
 
@@ -301,6 +302,25 @@ class Connection(BaseConnection):
                 result.extend(self._get_table_names(child_abs_path))
         return result
 
+    @handle_ydb_errors
+    def bulk_upsert(
+        self,
+        table_name: str,
+        rows: Sequence,
+        column_types: ydb.BulkUpsertColumns,
+    ) -> None:
+        settings = self._get_request_settings()
+        abs_table_path = posixpath.join(
+            self.database, self.table_path_prefix, table_name
+        )
+
+        self._driver.table_client.bulk_upsert(
+            abs_table_path,
+            rows=rows,
+            column_types=column_types,
+            settings=settings,
+        )
+
 
 class AsyncConnection(BaseConnection):
     _driver_cls = ydb.aio.Driver
@@ -445,6 +465,25 @@ class AsyncConnection(BaseConnection):
             elif child.is_directory() and not child.name.startswith("."):
                 result.extend(await self._get_table_names(child_abs_path))
         return result
+
+    @handle_ydb_errors
+    async def bulk_upsert(
+        self,
+        table_name: str,
+        rows: Sequence,
+        column_types: ydb.BulkUpsertColumns,
+    ) -> None:
+        settings = self._get_request_settings()
+        abs_table_path = posixpath.join(
+            self.database, self.table_path_prefix, table_name
+        )
+
+        await self._driver.table_client.bulk_upsert(
+            abs_table_path,
+            rows=rows,
+            column_types=column_types,
+            settings=settings,
+        )
 
 
 def connect(*args: tuple, **kwargs: dict) -> Connection:
