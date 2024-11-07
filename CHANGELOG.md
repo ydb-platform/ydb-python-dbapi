@@ -1,3 +1,6 @@
+* Add bulk upsert to connection
+* Fix README markup
+
 ## 0.0.1b8 ##
 * Cherry pick settings propagation
 
