@@ -1,3 +1,5 @@
+* Decrease min Python version to 3.8
+
 ## 0.1.0 ##
 * Add bulk upsert to connection
 * Fix README markup
