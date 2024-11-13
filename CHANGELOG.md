@@ -1,3 +1,4 @@
+## 0.1.1 ##
 * Decrease min Python version to 3.8
 
 ## 0.1.0 ##
