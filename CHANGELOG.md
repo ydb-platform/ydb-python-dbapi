@@ -1,3 +1,5 @@
+* Ability to pass credentials by string
+
 ## 0.1.1 ##
 * Decrease min Python version to 3.8
 
