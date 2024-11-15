@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import functools
 import importlib.util
+import json
 from enum import Enum
 from inspect import iscoroutinefunction
 from typing import Any
@@ -117,3 +118,30 @@ def maybe_get_current_trace_id() -> str | None:
 
     # Return None if OpenTelemetry is not available or trace ID is invalid
     return None
+
+
+def prepare_credentials(
+    credentials: ydb.Credentials | dict | str | None,
+) -> ydb.Credentials | None:
+    if not credentials:
+        return None
+
+    if isinstance(credentials, ydb.Credentials):
+        return credentials
+
+    if isinstance(credentials, str):
+        credentials = json.loads(credentials)
+
+    if isinstance(credentials, dict):
+        credentials = credentials or {}
+        token = credentials.get("token")
+        if token:
+            return ydb.AccessTokenCredentials(token)
+
+        service_account_json = credentials.get("service_account_json")
+        if service_account_json:
+            return ydb.iam.ServiceAccountCredentials.from_content(
+                json.dumps(service_account_json)
+            )
+
+    return ydb.AnonymousCredentials()
