@@ -20,6 +20,7 @@ from .errors import InternalError
 from .errors import NotSupportedError
 from .utils import handle_ydb_errors
 from .utils import maybe_get_current_trace_id
+from .utils import prepare_credentials
 
 
 class IsolationLevel(str, Enum):
@@ -69,13 +70,15 @@ class BaseConnection:
         port: str = "",
         database: str = "",
         ydb_table_path_prefix: str = "",
-        credentials: ydb.AbstractCredentials | None = None,
+        protocol: str | None = None,
+        credentials: ydb.Credentials | dict | str | None = None,
         ydb_session_pool: SessionPool | AsyncSessionPool | None = None,
         **kwargs: dict,
     ) -> None:
-        self.endpoint = f"grpc://{host}:{port}"
+        protocol = protocol if protocol else "grpc"
+        self.endpoint = f"{protocol}://{host}:{port}"
+        self.credentials = prepare_credentials(credentials)
         self.database = database
-        self.credentials = credentials
         self.table_path_prefix = ydb_table_path_prefix
 
         self.connection_kwargs: dict = kwargs
@@ -170,7 +173,8 @@ class Connection(BaseConnection):
         port: str = "",
         database: str = "",
         ydb_table_path_prefix: str = "",
-        credentials: ydb.AbstractCredentials | None = None,
+        protocol: str | None = None,
+        credentials: ydb.Credentials | None = None,
         ydb_session_pool: SessionPool | AsyncSessionPool | None = None,
         **kwargs: dict,
     ) -> None:
@@ -179,6 +183,7 @@ class Connection(BaseConnection):
             port=port,
             database=database,
             ydb_table_path_prefix=ydb_table_path_prefix,
+            protocol=protocol,
             credentials=credentials,
             ydb_session_pool=ydb_session_pool,
             **kwargs,
@@ -333,7 +338,8 @@ class AsyncConnection(BaseConnection):
         port: str = "",
         database: str = "",
         ydb_table_path_prefix: str = "",
-        credentials: ydb.AbstractCredentials | None = None,
+        protocol: str | None = None,
+        credentials: ydb.Credentials | None = None,
         ydb_session_pool: SessionPool | AsyncSessionPool | None = None,
         **kwargs: dict,
     ) -> None:
@@ -342,6 +348,7 @@ class AsyncConnection(BaseConnection):
             port=port,
             database=database,
             ydb_table_path_prefix=ydb_table_path_prefix,
+            protocol=protocol,
             credentials=credentials,
             ydb_session_pool=ydb_session_pool,
             **kwargs,
