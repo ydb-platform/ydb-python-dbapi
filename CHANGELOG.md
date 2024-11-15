@@ -1,3 +1,4 @@
+## 0.1.2 ##
 * Ability to pass credentials by string
 
 ## 0.1.1 ##
