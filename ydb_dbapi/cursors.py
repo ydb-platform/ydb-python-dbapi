@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 from collections.abc import Generator
 from collections.abc import Iterator
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 from typing import Any
 from typing import Union
 
@@ -18,14 +19,15 @@ from .utils import CursorStatus
 from .utils import handle_ydb_errors
 from .utils import maybe_get_current_trace_id
 
-ParametersType = dict[
-    str,
-    Union[
-        Any,
-        tuple[Any, Union[ydb.PrimitiveType, ydb.AbstractTypeBuilder]],
-        ydb.TypedValue,
-    ],
-]
+if TYPE_CHECKING:
+    ParametersType = dict[
+        str,
+        Union[
+            Any,
+            tuple[Any, Union[ydb.PrimitiveType, ydb.AbstractTypeBuilder]],
+            ydb.TypedValue,
+        ],
+    ]
 
 
 def _get_column_type(type_obj: Any) -> str:
