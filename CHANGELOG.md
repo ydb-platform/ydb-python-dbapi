@@ -1,3 +1,5 @@
+* Fix python 3.8 typing
+
 ## 0.1.2 ##
 * Ability to pass credentials by string
 
