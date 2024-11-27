@@ -23,7 +23,7 @@ on:
         description: Is beta version
         required: true
         type: boolean
-        default: True
+        default: False
 jobs:
   publish:
     env:
