@@ -1,3 +1,5 @@
+* Fix description update
+
 ## 0.1.3 ##
 * Fix python 3.8 typing
 
