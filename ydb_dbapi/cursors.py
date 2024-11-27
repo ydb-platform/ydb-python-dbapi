@@ -92,6 +92,11 @@ class BufferedCursor:
                     self._rows_count = new_rows_count
 
     def _update_description(self, result_set: ydb.convert.ResultSet) -> None:
+        if not result_set.columns:
+            # We should not rely on 'empty' result sets,
+            # because they can appear at any moment
+            return
+
         self._description = [
             (
                 col.name,
