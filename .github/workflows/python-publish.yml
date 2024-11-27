@@ -15,7 +15,7 @@ on:
         description: Version part
         required: true
         type: choice
-        default: minor
+        default: patch
         options:
           - minor
           - patch
