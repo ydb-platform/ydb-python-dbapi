@@ -134,6 +134,15 @@ def prepare_credentials(
 
     if isinstance(credentials, dict):
         credentials = credentials or {}
+
+        username = credentials.get("username")
+        if username:
+            password = credentials.get("password")
+            return ydb.StaticCredentials.from_user_password(
+                username,
+                password,
+            )
+
         token = credentials.get("token")
         if token:
             return ydb.AccessTokenCredentials(token)
@@ -141,7 +150,7 @@ def prepare_credentials(
         service_account_json = credentials.get("service_account_json")
         if service_account_json:
             return ydb.iam.ServiceAccountCredentials.from_content(
-                json.dumps(service_account_json)
+                json.dumps(service_account_json),
             )
 
     return ydb.AnonymousCredentials()
