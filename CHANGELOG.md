@@ -1,3 +1,4 @@
+## 0.1.5 ##
 * Add StaticCredentials parser
 
 ## 0.1.4 ##
