@@ -78,7 +78,7 @@ class BaseConnection:
         protocol = protocol if protocol else "grpc"
         self.endpoint = f"{protocol}://{host}:{port}"
         self.credentials = prepare_credentials(credentials)
-        self.database = database
+        self.database = self._maybe_add_slash(database)
         self.table_path_prefix = ydb_table_path_prefix
 
         self.connection_kwargs: dict = kwargs
@@ -160,6 +160,15 @@ class BaseConnection:
             .with_native_interval_in_result_sets(True)
             .with_native_json_in_result_sets(False)
         )
+
+    def _maybe_add_slash(self, database: str) -> str:
+        if not database:
+            return database
+
+        if database.startswith("/"):
+            return database
+
+        return f"/{database}"
 
 
 class Connection(BaseConnection):
