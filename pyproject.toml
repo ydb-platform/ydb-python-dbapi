@@ -5,6 +5,9 @@ description = "YDB Python DBAPI which complies with PEP 249"
 authors = ["Yandex LLC <ydb@yandex-team.ru>"]
 readme = "README.md"
 
+[project.urls]
+Homepage = "https://github.com/ydb-platform/ydb-python-dbapi/"
+
 [tool.poetry.dependencies]
 python = "^3.8"
 ydb = "^3.18.8"
