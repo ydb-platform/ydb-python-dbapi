@@ -6,10 +6,12 @@ from inspect import iscoroutine
 
 import pytest
 import ydb
+import ydb_dbapi
 from sqlalchemy.util import await_only
 from sqlalchemy.util import greenlet_spawn
 from ydb_dbapi import AsyncCursor
 from ydb_dbapi import Cursor
+from ydb_dbapi.utils import CursorStatus
 
 
 def maybe_await(obj: callable) -> any:
@@ -20,6 +22,14 @@ def maybe_await(obj: callable) -> any:
 
 RESULT_SET_LENGTH = 4
 RESULT_SET_COUNT = 3
+
+
+class FakeSyncConnection:
+    def _invalidate_session(self) -> None: ...
+
+
+class FakeAsyncConnection:
+    async def _invalidate_session(self) -> None: ...
 
 
 class BaseCursorTestSuit:
@@ -136,13 +146,24 @@ class BaseCursorTestSuit:
         assert maybe_await(cursor.fetchall()) == []
         assert not maybe_await(cursor.nextset())
 
+    def _test_cursor_state_after_error(
+        self, cursor: Cursor | AsyncCursor
+    ) -> None:
+        query = "INSERT INTO table (id, val) VALUES (0,0)"
+        with pytest.raises(ydb_dbapi.Error):
+            maybe_await(cursor.execute(query=query))
+
+        assert cursor._state == CursorStatus.finished
+
 
 class TestCursor(BaseCursorTestSuit):
     @pytest.fixture
     def sync_cursor(
         self, session_pool_sync: ydb.QuerySessionPool
     ) -> Generator[Cursor]:
+
         cursor = Cursor(
+            FakeSyncConnection(),
             session_pool_sync,
             ydb.QuerySerializableReadWrite(),
             request_settings=ydb.BaseRequestSettings(),
@@ -174,6 +195,10 @@ class TestCursor(BaseCursorTestSuit):
     ) -> None:
         self._test_cursor_fetch_all_multiple_result_sets(sync_cursor)
 
+    def test_cursor_state_after_error(
+        self, sync_cursor: Cursor
+    ) -> None:
+        self._test_cursor_state_after_error(sync_cursor)
 
 
 class TestAsyncCursor(BaseCursorTestSuit):
@@ -182,6 +207,7 @@ class TestAsyncCursor(BaseCursorTestSuit):
         self, session_pool: ydb.aio.QuerySessionPool
     ) -> AsyncGenerator[Cursor]:
         cursor = AsyncCursor(
+            FakeAsyncConnection(),
             session_pool,
             ydb.QuerySerializableReadWrite(),
             request_settings=ydb.BaseRequestSettings(),
@@ -223,4 +249,12 @@ class TestAsyncCursor(BaseCursorTestSuit):
     ) -> None:
         await greenlet_spawn(
             self._test_cursor_fetch_all_multiple_result_sets, async_cursor
+        )
+
+    @pytest.mark.asyncio
+    async def test_cursor_state_after_error(
+        self, async_cursor: AsyncCursor
+    ) -> None:
+        await greenlet_spawn(
+            self._test_cursor_state_after_error, async_cursor
         )
