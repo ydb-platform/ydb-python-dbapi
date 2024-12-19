@@ -200,6 +200,34 @@ class BaseDBApiTestSuit:
 
         maybe_await(cursor.execute_scheme("DROP TABLE pet"))
 
+    def _test_error_with_interactive_tx(
+        self,
+        connection: dbapi.Connection,
+    ) -> None:
+
+        cur = connection.cursor()
+        maybe_await(cur.execute_scheme(
+            """
+            DROP TABLE IF EXISTS test;
+            CREATE TABLE test (
+            id Int64 NOT NULL,
+            val Int64,
+            PRIMARY KEY(id)
+            )
+            """
+        ))
+
+        connection.set_isolation_level(dbapi.IsolationLevel.SERIALIZABLE)
+        maybe_await(connection.begin())
+
+        cur = connection.cursor()
+        maybe_await(cur.execute("INSERT INTO test(id, val) VALUES (1,1)"))
+        with pytest.raises(dbapi.Error):
+            maybe_await(cur.execute("INSERT INTO test(id, val) VALUES (1,1)"))
+
+        maybe_await(cur.close())
+        maybe_await(connection.rollback())
+
 
 class TestConnection(BaseDBApiTestSuit):
     @pytest.fixture
@@ -244,6 +272,11 @@ class TestConnection(BaseDBApiTestSuit):
 
     def test_bulk_upsert(self, connection: dbapi.Connection) -> None:
         self._test_bulk_upsert(connection)
+
+    def test_errors_with_interactive_tx(
+            self, connection: dbapi.Connection
+        ) -> None:
+        self._test_error_with_interactive_tx(connection)
 
 
 class TestAsyncConnection(BaseDBApiTestSuit):
@@ -304,3 +337,9 @@ class TestAsyncConnection(BaseDBApiTestSuit):
         self, connection: dbapi.AsyncConnection
     ) -> None:
         await greenlet_spawn(self._test_bulk_upsert, connection)
+
+    @pytest.mark.asyncio
+    async def test_errors_with_interactive_tx(
+        self, connection: dbapi.AsyncConnection
+    ) -> None:
+        await greenlet_spawn(self._test_error_with_interactive_tx, connection)

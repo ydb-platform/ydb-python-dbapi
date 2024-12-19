@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import functools
 import itertools
 from collections.abc import AsyncIterator
 from collections.abc import Generator
 from collections.abc import Iterator
 from collections.abc import Sequence
+from inspect import iscoroutinefunction
 from typing import TYPE_CHECKING
 from typing import Any
+from typing import Callable
 from typing import Union
 
 import ydb
@@ -20,6 +23,9 @@ from .utils import handle_ydb_errors
 from .utils import maybe_get_current_trace_id
 
 if TYPE_CHECKING:
+    from .connections import AsyncConnection
+    from .connections import Connection
+
     ParametersType = dict[
         str,
         Union[
@@ -32,6 +38,34 @@ if TYPE_CHECKING:
 
 def _get_column_type(type_obj: Any) -> str:
     return str(ydb.convert.type_to_native(type_obj))
+
+
+def invalidate_cursor_on_ydb_error(func: Callable) -> Callable:
+    if iscoroutinefunction(func):
+
+        @functools.wraps(func)
+        async def awrapper(
+            self: AsyncCursor, *args: tuple, **kwargs: dict
+        ) -> Any:
+            try:
+                return await func(self, *args, **kwargs)
+            except ydb.Error:
+                self._state = CursorStatus.finished
+                await self._connection._invalidate_session()
+                raise
+
+        return awrapper
+
+    @functools.wraps(func)
+    def wrapper(self: Cursor, *args: tuple, **kwargs: dict) -> Any:
+        try:
+            return func(self, *args, **kwargs)
+        except ydb.Error:
+            self._state = CursorStatus.finished
+            self._connection._invalidate_session()
+            raise
+
+    return wrapper
 
 
 class BufferedCursor:
@@ -154,6 +188,7 @@ class BufferedCursor:
 class Cursor(BufferedCursor):
     def __init__(
         self,
+        connection: Connection,
         session_pool: ydb.QuerySessionPool,
         tx_mode: ydb.BaseQueryTxMode,
         request_settings: ydb.BaseRequestSettings,
@@ -161,6 +196,7 @@ class Cursor(BufferedCursor):
         table_path_prefix: str = "",
     ) -> None:
         super().__init__()
+        self._connection = connection
         self._session_pool = session_pool
         self._tx_mode = tx_mode
         self._request_settings = request_settings
@@ -188,6 +224,7 @@ class Cursor(BufferedCursor):
         return settings
 
     @handle_ydb_errors
+    @invalidate_cursor_on_ydb_error
     def _execute_generic_query(
         self, query: str, parameters: ParametersType | None = None
     ) -> Iterator[ydb.convert.ResultSet]:
@@ -205,6 +242,7 @@ class Cursor(BufferedCursor):
         return self._session_pool.retry_operation_sync(callee)
 
     @handle_ydb_errors
+    @invalidate_cursor_on_ydb_error
     def _execute_session_query(
         self,
         query: str,
@@ -225,6 +263,7 @@ class Cursor(BufferedCursor):
         return self._session_pool.retry_operation_sync(callee)
 
     @handle_ydb_errors
+    @invalidate_cursor_on_ydb_error
     def _execute_transactional_query(
         self,
         tx_context: ydb.QueryTxContext,
@@ -283,6 +322,7 @@ class Cursor(BufferedCursor):
             self.execute(query, parameters)
 
     @handle_ydb_errors
+    @invalidate_cursor_on_ydb_error
     def nextset(self, replace_current: bool = True) -> bool:
         if self._stream is None:
             return False
@@ -328,6 +368,7 @@ class Cursor(BufferedCursor):
 class AsyncCursor(BufferedCursor):
     def __init__(
         self,
+        connection: AsyncConnection,
         session_pool: ydb.aio.QuerySessionPool,
         tx_mode: ydb.BaseQueryTxMode,
         request_settings: ydb.BaseRequestSettings,
@@ -335,6 +376,7 @@ class AsyncCursor(BufferedCursor):
         table_path_prefix: str = "",
     ) -> None:
         super().__init__()
+        self._connection = connection
         self._session_pool = session_pool
         self._tx_mode = tx_mode
         self._request_settings = request_settings
@@ -362,6 +404,7 @@ class AsyncCursor(BufferedCursor):
         return settings
 
     @handle_ydb_errors
+    @invalidate_cursor_on_ydb_error
     async def _execute_generic_query(
         self, query: str, parameters: ParametersType | None = None
     ) -> AsyncIterator[ydb.convert.ResultSet]:
@@ -379,6 +422,7 @@ class AsyncCursor(BufferedCursor):
         return await self._session_pool.retry_operation_async(callee)
 
     @handle_ydb_errors
+    @invalidate_cursor_on_ydb_error
     async def _execute_session_query(
         self,
         query: str,
@@ -399,6 +443,7 @@ class AsyncCursor(BufferedCursor):
         return await self._session_pool.retry_operation_async(callee)
 
     @handle_ydb_errors
+    @invalidate_cursor_on_ydb_error
     async def _execute_transactional_query(
         self,
         tx_context: ydb.aio.QueryTxContext,
@@ -457,6 +502,7 @@ class AsyncCursor(BufferedCursor):
             await self.execute(query, parameters)
 
     @handle_ydb_errors
+    @invalidate_cursor_on_ydb_error
     async def nextset(self, replace_current: bool = True) -> bool:
         if self._stream is None:
             return False

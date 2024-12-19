@@ -192,6 +192,7 @@ class Connection(BaseConnection):
 
     def cursor(self) -> Cursor:
         return self._cursor_cls(
+            connection=self,
             session_pool=self._session_pool,
             tx_mode=self._tx_mode,
             tx_context=self._tx_context,
@@ -326,6 +327,13 @@ class Connection(BaseConnection):
             settings=settings,
         )
 
+    def _invalidate_session(self) -> None:
+        if self._tx_context:
+            self._tx_context = None
+        if self._session:
+            self._session_pool.release(self._session)
+            self._session = None
+
 
 class AsyncConnection(BaseConnection):
     _driver_cls = ydb.aio.Driver
@@ -357,6 +365,7 @@ class AsyncConnection(BaseConnection):
 
     def cursor(self) -> AsyncCursor:
         return self._cursor_cls(
+            connection=self,
             session_pool=self._session_pool,
             tx_mode=self._tx_mode,
             tx_context=self._tx_context,
@@ -491,6 +500,13 @@ class AsyncConnection(BaseConnection):
             column_types=column_types,
             settings=settings,
         )
+
+    async def _invalidate_session(self) -> None:
+        if self._tx_context:
+            self._tx_context = None
+        if self._session:
+            await self._session_pool.release(self._session)
+            self._session = None
 
 
 def connect(*args: tuple, **kwargs: dict) -> Connection:
