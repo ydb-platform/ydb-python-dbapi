@@ -1,3 +1,5 @@
+* Update ydb dependency to 3.8.13
+
 ## 0.1.6 ##
 * Invalidate session&tx on YDB errors
 
