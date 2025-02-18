@@ -40,11 +40,11 @@ class BaseCursorTestSuit:
         maybe_await(cursor.execute(query=yql_text))
 
         for i in range(4):
-            res = maybe_await(cursor.fetchone())
+            res = cursor.fetchone()
             assert res is not None
             assert res[0] == i
 
-        assert maybe_await(cursor.fetchone()) is None
+        assert cursor.fetchone() is None
 
     def _test_cursor_fetch_many(self, cursor: Cursor | AsyncCursor) -> None:
         yql_text = """
@@ -52,23 +52,23 @@ class BaseCursorTestSuit:
         """
         maybe_await(cursor.execute(query=yql_text))
 
-        res = maybe_await(cursor.fetchmany())
+        res = cursor.fetchmany()
         assert res is not None
         assert len(res) == 1
         assert res[0][0] == 0
 
-        res = maybe_await(cursor.fetchmany(size=2))
+        res = cursor.fetchmany(size=2)
         assert res is not None
         assert len(res) == 2
         assert res[0][0] == 1
         assert res[1][0] == 2
 
-        res = maybe_await(cursor.fetchmany(size=2))
+        res = cursor.fetchmany(size=2)
         assert res is not None
         assert len(res) == 1
         assert res[0][0] == 3
 
-        assert maybe_await(cursor.fetchmany(size=2)) == []
+        assert cursor.fetchmany(size=2) == []
 
     def _test_cursor_fetch_all(self, cursor: Cursor | AsyncCursor) -> None:
         yql_text = """
@@ -78,13 +78,13 @@ class BaseCursorTestSuit:
 
         assert cursor.rowcount == 4
 
-        res = maybe_await(cursor.fetchall())
+        res = cursor.fetchall()
         assert res is not None
         assert len(res) == 4
         for i in range(4):
             assert res[i][0] == i
 
-        assert maybe_await(cursor.fetchall()) == []
+        assert cursor.fetchall() == []
 
     def _test_cursor_fetch_one_multiple_result_sets(
         self, cursor: Cursor | AsyncCursor
@@ -99,11 +99,11 @@ class BaseCursorTestSuit:
         assert cursor.rowcount == 12
 
         for i in range(RESULT_SET_LENGTH * RESULT_SET_COUNT):
-            res = maybe_await(cursor.fetchone())
+            res = cursor.fetchone()
             assert res is not None
             assert res[0] == i % RESULT_SET_LENGTH
 
-        assert maybe_await(cursor.fetchone()) is None
+        assert cursor.fetchone() is None
         assert not maybe_await(cursor.nextset())
 
     def _test_cursor_fetch_many_multiple_result_sets(
@@ -120,11 +120,11 @@ class BaseCursorTestSuit:
 
         halfsize = (RESULT_SET_LENGTH * RESULT_SET_COUNT) // 2
         for _ in range(2):
-            res = maybe_await(cursor.fetchmany(size=halfsize))
+            res = cursor.fetchmany(size=halfsize)
             assert res is not None
             assert len(res) == halfsize
 
-        assert maybe_await(cursor.fetchmany(2)) == []
+        assert cursor.fetchmany(2) == []
         assert not maybe_await(cursor.nextset())
 
     def _test_cursor_fetch_all_multiple_result_sets(
@@ -139,11 +139,11 @@ class BaseCursorTestSuit:
 
         assert cursor.rowcount == 12
 
-        res = maybe_await(cursor.fetchall())
+        res = cursor.fetchall()
 
         assert len(res) == RESULT_SET_COUNT * RESULT_SET_LENGTH
 
-        assert maybe_await(cursor.fetchall()) == []
+        assert cursor.fetchall() == []
         assert not maybe_await(cursor.nextset())
 
     def _test_cursor_state_after_error(

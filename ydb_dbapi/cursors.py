@@ -385,14 +385,14 @@ class AsyncCursor(BufferedCursor):
 
         self._stream: AsyncIterator | None = None
 
-    async def fetchone(self) -> tuple | None:
+    def fetchone(self) -> tuple | None:
         return self._fetchone_from_buffer()
 
-    async def fetchmany(self, size: int | None = None) -> list:
+    def fetchmany(self, size: int | None = None) -> list:
         size = size or self.arraysize
         return self._fetchmany_from_buffer(size)
 
-    async def fetchall(self) -> list:
+    def fetchall(self) -> list:
         return self._fetchall_from_buffer()
 
     def _get_request_settings(self) -> ydb.BaseRequestSettings:
