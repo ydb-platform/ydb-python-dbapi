@@ -1,3 +1,4 @@
+## 0.1.8 ##
 * Make cursor.fetch*() sync for async cursor
 
 ## 0.1.7 ##
