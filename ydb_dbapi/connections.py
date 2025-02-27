@@ -73,6 +73,7 @@ class BaseConnection:
         protocol: str | None = None,
         credentials: ydb.Credentials | dict | str | None = None,
         ydb_session_pool: SessionPool | AsyncSessionPool | None = None,
+        root_certificates_path: str | None = None,
         **kwargs: dict,
     ) -> None:
         protocol = protocol if protocol else "grpc"
@@ -101,6 +102,7 @@ class BaseConnection:
                 database=self.database,
                 credentials=self.credentials,
                 query_client_settings=self._get_client_settings(),
+                root_certificates=ydb.load_ydb_root_certificate(root_certificates_path),
             )
             self._driver = self._driver_cls(driver_config)
             self._session_pool = self._pool_cls(self._driver, size=5)
@@ -176,6 +178,7 @@ class Connection(BaseConnection):
         protocol: str | None = None,
         credentials: ydb.Credentials | None = None,
         ydb_session_pool: SessionPool | AsyncSessionPool | None = None,
+        root_certificates_path: str | None = None,
         **kwargs: dict,
     ) -> None:
         super().__init__(
@@ -186,6 +189,7 @@ class Connection(BaseConnection):
             protocol=protocol,
             credentials=credentials,
             ydb_session_pool=ydb_session_pool,
+            root_certificates_path=root_certificates_path,
             **kwargs,
         )
         self._current_cursor: Cursor | None = None
@@ -349,6 +353,7 @@ class AsyncConnection(BaseConnection):
         protocol: str | None = None,
         credentials: ydb.Credentials | None = None,
         ydb_session_pool: SessionPool | AsyncSessionPool | None = None,
+        root_certificates_path: str | None = None,
         **kwargs: dict,
     ) -> None:
         super().__init__(
@@ -359,6 +364,7 @@ class AsyncConnection(BaseConnection):
             protocol=protocol,
             credentials=credentials,
             ydb_session_pool=ydb_session_pool,
+            root_certificates_path=root_certificates_path,
             **kwargs,
         )
         self._current_cursor: AsyncCursor | None = None
