@@ -350,7 +350,7 @@ class Cursor(BufferedCursor):
         if self._state == CursorStatus.closed:
             return
 
-        self._scroll_stream()
+        # self._scroll_stream() # No need to scroll since all data is already fetched
         self._state = CursorStatus.closed
 
     def __enter__(self) -> Self:
@@ -527,11 +527,11 @@ class AsyncCursor(BufferedCursor):
 
         self._state = CursorStatus.finished
 
-    async def close(self) -> None:
+    def close(self) -> None:
         if self._state == CursorStatus.closed:
             return
 
-        await self._scroll_stream()
+        # await self._scroll_stream() # No need to scroll since all data is already fetched
         self._state = CursorStatus.closed
 
     async def __aenter__(self) -> Self:
@@ -543,4 +543,4 @@ class AsyncCursor(BufferedCursor):
         exc: BaseException | None,
         tb: object,
     ) -> None:
-        await self.close()
+        self.close()
