@@ -1,3 +1,4 @@
+## 0.1.9 ##
 * Ability to use root_ca
 
 ## 0.1.8 ##
