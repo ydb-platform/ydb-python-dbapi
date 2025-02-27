@@ -1,3 +1,5 @@
+* Make async cursor close() sync
+
 ## 0.1.9 ##
 * Ability to use root_ca
 
