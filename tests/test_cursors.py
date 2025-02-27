@@ -213,7 +213,7 @@ class TestAsyncCursor(BaseCursorTestSuit):
             request_settings=ydb.BaseRequestSettings(),
         )
         yield cursor
-        await greenlet_spawn(cursor.close)
+        cursor.close()
 
     @pytest.mark.asyncio
     async def test_cursor_fetch_one(self, async_cursor: AsyncCursor) -> None:
