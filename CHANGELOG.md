@@ -1,3 +1,4 @@
+## 0.1.10 ##
 * Make async cursor close() sync
 
 ## 0.1.9 ##
