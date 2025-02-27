@@ -1,3 +1,5 @@
+* Ability to use root_ca
+
 ## 0.1.8 ##
 * Make cursor.fetch*() sync for async cursor
 
