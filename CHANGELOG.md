@@ -1,3 +1,5 @@
+* Fix pending query issue
+
 ## 0.1.10 ##
 * Make async cursor close() sync
 
