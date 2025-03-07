@@ -102,7 +102,9 @@ class BaseConnection:
                 database=self.database,
                 credentials=self.credentials,
                 query_client_settings=self._get_client_settings(),
-                root_certificates=ydb.load_ydb_root_certificate(root_certificates_path),
+                root_certificates=ydb.load_ydb_root_certificate(
+                    root_certificates_path
+                ),
             )
             self._driver = self._driver_cls(driver_config)
             self._session_pool = self._pool_cls(self._driver, size=5)
