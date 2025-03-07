@@ -161,7 +161,6 @@ class TestCursor(BaseCursorTestSuit):
     def sync_cursor(
         self, session_pool_sync: ydb.QuerySessionPool
     ) -> Generator[Cursor]:
-
         cursor = Cursor(
             FakeSyncConnection(),
             session_pool_sync,
@@ -195,9 +194,7 @@ class TestCursor(BaseCursorTestSuit):
     ) -> None:
         self._test_cursor_fetch_all_multiple_result_sets(sync_cursor)
 
-    def test_cursor_state_after_error(
-        self, sync_cursor: Cursor
-    ) -> None:
+    def test_cursor_state_after_error(self, sync_cursor: Cursor) -> None:
         self._test_cursor_state_after_error(sync_cursor)
 
 
@@ -255,6 +252,4 @@ class TestAsyncCursor(BaseCursorTestSuit):
     async def test_cursor_state_after_error(
         self, async_cursor: AsyncCursor
     ) -> None:
-        await greenlet_spawn(
-            self._test_cursor_state_after_error, async_cursor
-        )
+        await greenlet_spawn(self._test_cursor_state_after_error, async_cursor)

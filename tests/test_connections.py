@@ -29,9 +29,11 @@ class BaseDBApiTestSuit:
         cursor = connection.cursor()
         with suppress(dbapi.DatabaseError):
             maybe_await(cursor.execute_scheme("DROP TABLE foo"))
-        maybe_await(cursor.execute_scheme(
-            "CREATE TABLE foo(id Int64 NOT NULL, PRIMARY KEY (id))"
-        ))
+        maybe_await(
+            cursor.execute_scheme(
+                "CREATE TABLE foo(id Int64 NOT NULL, PRIMARY KEY (id))"
+            )
+        )
 
         connection.set_isolation_level(isolation_level)
         cursor = connection.cursor()
@@ -60,9 +62,11 @@ class BaseDBApiTestSuit:
         with pytest.raises(dbapi.ProgrammingError):
             maybe_await(connection.describe("/local/foo"))
 
-        maybe_await(cur.execute_scheme(
-            "CREATE TABLE foo(id Int64 NOT NULL, PRIMARY KEY (id))"
-        ))
+        maybe_await(
+            cur.execute_scheme(
+                "CREATE TABLE foo(id Int64 NOT NULL, PRIMARY KEY (id))"
+            )
+        )
 
         assert maybe_await(connection.check_exists("/local/foo"))
 
@@ -84,26 +88,28 @@ class BaseDBApiTestSuit:
             "CREATE TABLE test(id Int64 NOT NULL, text Utf8, PRIMARY KEY (id))"
         ))
 
-        maybe_await(cur.execute(
-            """
+        maybe_await(
+            cur.execute(
+                """
             DECLARE $data AS List<Struct<id:Int64, text: Utf8>>;
 
             INSERT INTO test SELECT id, text FROM AS_TABLE($data);
             """,
-            {
-                "$data": ydb.TypedValue(
-                    [
-                        {"id": 17, "text": "seventeen"},
-                        {"id": 21, "text": "twenty one"},
-                    ],
-                    ydb.ListType(
-                        ydb.StructType()
-                        .add_member("id", ydb.PrimitiveType.Int64)
-                        .add_member("text", ydb.PrimitiveType.Utf8)
-                    ),
-                )
-            },
-        ))
+                {
+                    "$data": ydb.TypedValue(
+                        [
+                            {"id": 17, "text": "seventeen"},
+                            {"id": 21, "text": "twenty one"},
+                        ],
+                        ydb.ListType(
+                            ydb.StructType()
+                            .add_member("id", ydb.PrimitiveType.Int64)
+                            .add_member("text", ydb.PrimitiveType.Utf8)
+                        ),
+                    )
+                },
+            )
+        )
 
         maybe_await(cur.execute_scheme("DROP TABLE test"))
 
@@ -112,13 +118,15 @@ class BaseDBApiTestSuit:
     def _test_errors(
         self,
         connection: dbapi.Connection,
-        connect_method: callable = dbapi.connect
+        connect_method: callable = dbapi.connect,
     ) -> None:
         with pytest.raises(dbapi.InterfaceError):
-            maybe_await(connect_method(
-                "localhost:2136",  # type: ignore
-                database="/local666",  # type: ignore
-            ))
+            maybe_await(
+                connect_method(
+                    "localhost:2136",  # type: ignore
+                    database="/local666",  # type: ignore
+                )
+            )
 
         cur = connection.cursor()
 
@@ -137,9 +145,9 @@ class BaseDBApiTestSuit:
         with pytest.raises(dbapi.ProgrammingError):
             maybe_await(cur.execute("SELECT * FROM test"))
 
-        maybe_await(cur.execute_scheme(
-            "CREATE TABLE test(id Int64, PRIMARY KEY (id))"
-        ))
+        maybe_await(
+            cur.execute_scheme("CREATE TABLE test(id Int64, PRIMARY KEY (id))")
+        )
 
         maybe_await(cur.execute("INSERT INTO test(id) VALUES(1)"))
 
@@ -154,8 +162,9 @@ class BaseDBApiTestSuit:
         with suppress(dbapi.DatabaseError):
             maybe_await(cursor.execute_scheme("DROP TABLE pet"))
 
-        maybe_await(cursor.execute_scheme(
-            """
+        maybe_await(
+            cursor.execute_scheme(
+                """
             CREATE TABLE pet (
             pet_id INT,
             name TEXT NOT NULL,
@@ -165,7 +174,8 @@ class BaseDBApiTestSuit:
             PRIMARY KEY (pet_id)
             );
             """
-        ))
+            )
+        )
 
         column_types = (
             ydb.BulkUpsertColumns()
@@ -182,14 +192,14 @@ class BaseDBApiTestSuit:
                 "name": "Lester",
                 "pet_type": "Hamster",
                 "birth_date": "2020-06-23",
-                "owner": "Lily"
+                "owner": "Lily",
             },
             {
                 "pet_id": 4,
                 "name": "Quincy",
                 "pet_type": "Parrot",
                 "birth_date": "2013-08-11",
-                "owner": "Anne"
+                "owner": "Anne",
             },
         ]
 
@@ -204,10 +214,10 @@ class BaseDBApiTestSuit:
         self,
         connection: dbapi.Connection,
     ) -> None:
-
         cur = connection.cursor()
-        maybe_await(cur.execute_scheme(
-            """
+        maybe_await(
+            cur.execute_scheme(
+                """
             DROP TABLE IF EXISTS test;
             CREATE TABLE test (
             id Int64 NOT NULL,
@@ -215,7 +225,8 @@ class BaseDBApiTestSuit:
             PRIMARY KEY(id)
             )
             """
-        ))
+            )
+        )
 
         connection.set_isolation_level(dbapi.IsolationLevel.SERIALIZABLE)
         maybe_await(connection.begin())
@@ -274,8 +285,8 @@ class TestConnection(BaseDBApiTestSuit):
         self._test_bulk_upsert(connection)
 
     def test_errors_with_interactive_tx(
-            self, connection: dbapi.Connection
-        ) -> None:
+        self, connection: dbapi.Connection
+    ) -> None:
         self._test_error_with_interactive_tx(connection)
 
 
@@ -291,8 +302,10 @@ class TestAsyncConnection(BaseDBApiTestSuit):
         try:
             yield conn
         finally:
+
             def close() -> None:
                 maybe_await(conn.close())
+
             await greenlet_spawn(close)
 
     @pytest.mark.asyncio
@@ -315,7 +328,9 @@ class TestAsyncConnection(BaseDBApiTestSuit):
     ) -> None:
         await greenlet_spawn(
             self._test_isolation_level_read_only,
-            connection, isolation_level, read_only
+            connection,
+            isolation_level,
+            read_only,
         )
 
     @pytest.mark.asyncio

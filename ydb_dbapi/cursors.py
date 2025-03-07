@@ -144,6 +144,10 @@ class BufferedCursor:
             for col in result_set.columns
         ]
 
+    def _fill_buffer(self, result_set_list: list) -> None:
+        for result_set in result_set_list:
+            self._update_result_set(result_set, replace_current=False)
+
     def _raise_if_running(self) -> None:
         if self._state == CursorStatus.running:
             raise ProgrammingError(
@@ -163,6 +167,9 @@ class BufferedCursor:
 
     def _begin_query(self) -> None:
         self._state = CursorStatus.running
+
+    def _finish_query(self) -> None:
+        self._state = CursorStatus.finished
 
     def _fetchone_from_buffer(self) -> tuple | None:
         self._raise_if_closed()
@@ -223,20 +230,27 @@ class Cursor(BufferedCursor):
 
         return settings
 
+    def _materialize(
+        self, stream: Iterator[ydb.convert.ResultSet]
+    ) -> list[ydb.convert.ResultSet]:
+        return list(stream)
+
     @handle_ydb_errors
     @invalidate_cursor_on_ydb_error
     def _execute_generic_query(
         self, query: str, parameters: ParametersType | None = None
-    ) -> Iterator[ydb.convert.ResultSet]:
+    ) -> list[ydb.convert.ResultSet]:
         settings = self._get_request_settings()
 
         def callee(
             session: ydb.QuerySession,
-        ) -> Iterator[ydb.convert.ResultSet]:
-            return session.execute(
-                query=query,
-                parameters=parameters,
-                settings=settings,
+        ) -> list[ydb.convert.ResultSet]:
+            return self._materialize(
+                session.execute(
+                    query=query,
+                    parameters=parameters,
+                    settings=settings,
+                )
             )
 
         return self._session_pool.retry_operation_sync(callee)
@@ -247,17 +261,19 @@ class Cursor(BufferedCursor):
         self,
         query: str,
         parameters: ParametersType | None = None,
-    ) -> Iterator[ydb.convert.ResultSet]:
+    ) -> list[ydb.convert.ResultSet]:
         settings = self._get_request_settings()
 
         def callee(
             session: ydb.QuerySession,
-        ) -> Iterator[ydb.convert.ResultSet]:
-            return session.transaction(self._tx_mode).execute(
-                query=query,
-                parameters=parameters,
-                commit_tx=True,
-                settings=settings,
+        ) -> list[ydb.convert.ResultSet]:
+            return self._materialize(
+                session.transaction(self._tx_mode).execute(
+                    query=query,
+                    parameters=parameters,
+                    commit_tx=True,
+                    settings=settings,
+                )
             )
 
         return self._session_pool.retry_operation_sync(callee)
@@ -269,13 +285,15 @@ class Cursor(BufferedCursor):
         tx_context: ydb.QueryTxContext,
         query: str,
         parameters: ParametersType | None = None,
-    ) -> Iterator[ydb.convert.ResultSet]:
+    ) -> list[ydb.convert.ResultSet]:
         settings = self._get_request_settings()
-        return tx_context.execute(
-            query=query,
-            parameters=parameters,
-            commit_tx=False,
-            settings=settings,
+        return self._materialize(
+            tx_context.execute(
+                query=query,
+                parameters=parameters,
+                commit_tx=False,
+                settings=settings,
+            )
         )
 
     def execute_scheme(
@@ -286,12 +304,13 @@ class Cursor(BufferedCursor):
         self._raise_if_closed()
 
         query = self._append_table_path_prefix(query)
+        self._begin_query()
 
-        self._stream = self._execute_generic_query(
+        result_list = self._execute_generic_query(
             query=query, parameters=parameters
         )
-        self._begin_query()
-        self._scroll_stream(replace_current=False)
+        self._fill_buffer(result_list)
+        self._finish_query()
 
     def execute(
         self,
@@ -302,18 +321,19 @@ class Cursor(BufferedCursor):
         self._raise_if_running()
 
         query = self._append_table_path_prefix(query)
+        self._begin_query()
 
         if self._tx_context is not None:
-            self._stream = self._execute_transactional_query(
+            result_list = self._execute_transactional_query(
                 tx_context=self._tx_context, query=query, parameters=parameters
             )
         else:
-            self._stream = self._execute_session_query(
+            result_list = self._execute_session_query(
                 query=query, parameters=parameters
             )
 
-        self._begin_query()
-        self._scroll_stream(replace_current=False)
+        self._fill_buffer(result_list)
+        self._finish_query()
 
     def executemany(
         self, query: str, seq_of_parameters: Sequence[ParametersType]
@@ -321,30 +341,8 @@ class Cursor(BufferedCursor):
         for parameters in seq_of_parameters:
             self.execute(query, parameters)
 
-    @handle_ydb_errors
-    @invalidate_cursor_on_ydb_error
-    def nextset(self, replace_current: bool = True) -> bool:
-        if self._stream is None:
-            return False
-        try:
-            result_set = self._stream.__next__()
-            self._update_result_set(result_set, replace_current)
-        except (StopIteration, StopAsyncIteration, RuntimeError):
-            self._state = CursorStatus.finished
-            return False
-        except ydb.Error:
-            self._state = CursorStatus.finished
-            raise
-        return True
-
-    def _scroll_stream(self, replace_current: bool = True) -> None:
-        self._raise_if_closed()
-
-        next_set_available = True
-        while next_set_available:
-            next_set_available = self.nextset(replace_current)
-
-        self._state = CursorStatus.finished
+    def nextset(self) -> bool:
+        return False
 
     def close(self) -> None:
         if self._state == CursorStatus.closed:
@@ -402,20 +400,27 @@ class AsyncCursor(BufferedCursor):
 
         return settings
 
+    async def _materialize(
+        self, stream: AsyncIterator[ydb.convert.ResultSet]
+    ) -> list[ydb.convert.ResultSet]:
+        return [result_set async for result_set in stream]
+
     @handle_ydb_errors
     @invalidate_cursor_on_ydb_error
     async def _execute_generic_query(
         self, query: str, parameters: ParametersType | None = None
-    ) -> AsyncIterator[ydb.convert.ResultSet]:
+    ) -> list[ydb.convert.ResultSet]:
         settings = self._get_request_settings()
 
         async def callee(
             session: ydb.aio.QuerySession,
-        ) -> AsyncIterator[ydb.convert.ResultSet]:
-            return await session.execute(
-                query=query,
-                parameters=parameters,
-                settings=settings,
+        ) -> list[ydb.convert.ResultSet]:
+            return await self._materialize(
+                await session.execute(
+                    query=query,
+                    parameters=parameters,
+                    settings=settings,
+                )
             )
 
         return await self._session_pool.retry_operation_async(callee)
@@ -426,17 +431,19 @@ class AsyncCursor(BufferedCursor):
         self,
         query: str,
         parameters: ParametersType | None = None,
-    ) -> AsyncIterator[ydb.convert.ResultSet]:
+    ) -> list[ydb.convert.ResultSet]:
         settings = self._get_request_settings()
 
         async def callee(
             session: ydb.aio.QuerySession,
-        ) -> AsyncIterator[ydb.convert.ResultSet]:
-            return await session.transaction(self._tx_mode).execute(
-                query=query,
-                parameters=parameters,
-                commit_tx=True,
-                settings=settings,
+        ) -> list[ydb.convert.ResultSet]:
+            return await self._materialize(
+                await session.transaction(self._tx_mode).execute(
+                    query=query,
+                    parameters=parameters,
+                    commit_tx=True,
+                    settings=settings,
+                )
             )
 
         return await self._session_pool.retry_operation_async(callee)
@@ -448,13 +455,15 @@ class AsyncCursor(BufferedCursor):
         tx_context: ydb.aio.QueryTxContext,
         query: str,
         parameters: ParametersType | None = None,
-    ) -> AsyncIterator[ydb.convert.ResultSet]:
+    ) -> list[ydb.convert.ResultSet]:
         settings = self._get_request_settings()
-        return await tx_context.execute(
-            query=query,
-            parameters=parameters,
-            commit_tx=False,
-            settings=settings,
+        return await self._materialize(
+            await tx_context.execute(
+                query=query,
+                parameters=parameters,
+                commit_tx=False,
+                settings=settings,
+            )
         )
 
     async def execute_scheme(
@@ -465,12 +474,13 @@ class AsyncCursor(BufferedCursor):
         self._raise_if_closed()
 
         query = self._append_table_path_prefix(query)
+        self._begin_query()
 
-        self._stream = await self._execute_generic_query(
+        result_list = await self._execute_generic_query(
             query=query, parameters=parameters
         )
-        self._begin_query()
-        await self._scroll_stream(replace_current=False)
+        self._fill_buffer(result_list)
+        self._finish_query()
 
     async def execute(
         self,
@@ -482,17 +492,19 @@ class AsyncCursor(BufferedCursor):
 
         query = self._append_table_path_prefix(query)
 
+        self._begin_query()
+
         if self._tx_context is not None:
-            self._stream = await self._execute_transactional_query(
+            result_list = await self._execute_transactional_query(
                 tx_context=self._tx_context, query=query, parameters=parameters
             )
         else:
-            self._stream = await self._execute_session_query(
+            result_list = await self._execute_session_query(
                 query=query, parameters=parameters
             )
 
-        self._begin_query()
-        await self._scroll_stream(replace_current=False)
+        self._fill_buffer(result_list)
+        self._finish_query()
 
     async def executemany(
         self, query: str, seq_of_parameters: Sequence[ParametersType]
@@ -500,31 +512,8 @@ class AsyncCursor(BufferedCursor):
         for parameters in seq_of_parameters:
             await self.execute(query, parameters)
 
-    @handle_ydb_errors
-    @invalidate_cursor_on_ydb_error
-    async def nextset(self, replace_current: bool = True) -> bool:
-        if self._stream is None:
-            return False
-        try:
-            result_set = await self._stream.__anext__()
-            self._update_result_set(result_set, replace_current)
-        except (StopIteration, StopAsyncIteration, RuntimeError):
-            self._stream = None
-            self._state = CursorStatus.finished
-            return False
-        except ydb.Error:
-            self._state = CursorStatus.finished
-            raise
-        return True
-
-    async def _scroll_stream(self, replace_current: bool = True) -> None:
-        self._raise_if_closed()
-
-        next_set_available = True
-        while next_set_available:
-            next_set_available = await self.nextset(replace_current)
-
-        self._state = CursorStatus.finished
+    async def nextset(self) -> bool:
+        return False
 
     def close(self) -> None:
         if self._state == CursorStatus.closed:
