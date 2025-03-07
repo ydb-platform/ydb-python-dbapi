@@ -1,3 +1,4 @@
+## 0.1.11 ##
 * Fix pending query issue
 
 ## 0.1.10 ##
