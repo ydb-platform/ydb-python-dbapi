@@ -1,3 +1,5 @@
+* Ability to get view names
+
 ## 0.1.11 ##
 * Fix pending query issue
 
