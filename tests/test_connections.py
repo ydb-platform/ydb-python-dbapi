@@ -239,6 +239,41 @@ class BaseDBApiTestSuit:
         maybe_await(cur.close())
         maybe_await(connection.rollback())
 
+    def _test_get_view_names(
+        self,
+        connection: dbapi.Connection,
+    ) -> None:
+        cur = connection.cursor()
+
+        maybe_await(
+            cur.execute_scheme(
+                """
+                DROP VIEW if exists test_view;
+                """
+            )
+        )
+
+        res = maybe_await(connection.get_view_names())
+
+        assert len(res) == 0
+
+        maybe_await(
+            cur.execute_scheme(
+                """
+                CREATE VIEW test_view WITH (security_invoker = TRUE) as (
+                    select 1 as res
+                );
+                """
+            )
+        )
+
+        res = maybe_await(connection.get_view_names())
+
+        assert len(res) == 1
+        assert res[0] == "test_view"
+
+        maybe_await(cur.close())
+
 
 class TestConnection(BaseDBApiTestSuit):
     @pytest.fixture
@@ -288,6 +323,11 @@ class TestConnection(BaseDBApiTestSuit):
         self, connection: dbapi.Connection
     ) -> None:
         self._test_error_with_interactive_tx(connection)
+
+    def test_get_view_names(
+        self, connection: dbapi.Connection
+    ) -> None:
+        self._test_get_view_names(connection)
 
 
 class TestAsyncConnection(BaseDBApiTestSuit):
@@ -358,3 +398,9 @@ class TestAsyncConnection(BaseDBApiTestSuit):
         self, connection: dbapi.AsyncConnection
     ) -> None:
         await greenlet_spawn(self._test_error_with_interactive_tx, connection)
+
+    @pytest.mark.asyncio
+    async def test_get_view_names(
+        self, connection: dbapi.AsyncConnection
+    ) -> None:
+        await greenlet_spawn(self._test_get_view_names, connection)
