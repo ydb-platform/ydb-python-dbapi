@@ -1,3 +1,4 @@
+## 0.1.12 ##
 * Ability to get view names
 
 ## 0.1.11 ##
