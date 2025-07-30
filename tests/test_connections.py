@@ -236,6 +236,14 @@ class BaseDBApiTestSuit:
         with pytest.raises(dbapi.Error):
             maybe_await(cur.execute("INSERT INTO test(id, val) VALUES (1,1)"))
 
+        maybe_await(
+            cur.execute_scheme(
+                """
+                DROP TABLE IF EXISTS test;
+                """
+            )
+        )
+
         maybe_await(cur.close())
         maybe_await(connection.rollback())
 
@@ -271,6 +279,68 @@ class BaseDBApiTestSuit:
 
         assert len(res) == 1
         assert res[0] == "test_view"
+
+        maybe_await(
+            cur.execute_scheme(
+                """
+                DROP VIEW test_view;
+                """
+            )
+        )
+
+        maybe_await(cur.close())
+
+    def _test_get_table_names(
+        self,
+        connection: dbapi.Connection,
+    ) -> None:
+        cur = connection.cursor()
+
+        row_table_name = "test_table_names_row"
+        column_table_name = "test_table_names_column"
+
+        maybe_await(
+            cur.execute_scheme(
+                f"""
+                DROP TABLE if exists {row_table_name};
+                DROP TABLE if exists {column_table_name};
+                """
+            )
+        )
+
+        res = maybe_await(connection.get_table_names())
+
+        assert len(res) == 0
+
+        maybe_await(
+            cur.execute_scheme(
+                f"""
+                CREATE TABLE {row_table_name} (
+                    id Utf8 NOT NULL,
+                    PRIMARY KEY(id)
+                );
+                CREATE TABLE {column_table_name} (
+                    id Utf8 NOT NULL,
+                    PRIMARY KEY(id)
+                ) WITH (STORE = COLUMN);
+                """
+            )
+        )
+
+        res = maybe_await(connection.get_table_names())
+
+        assert len(res) == 2
+        assert row_table_name in res
+        assert column_table_name in res
+
+        maybe_await(
+            cur.execute_scheme(
+                f"""
+                DROP TABLE {row_table_name};
+                DROP TABLE {column_table_name};
+                """
+            )
+        )
 
         maybe_await(cur.close())
 
@@ -328,6 +398,11 @@ class TestConnection(BaseDBApiTestSuit):
         self, connection: dbapi.Connection
     ) -> None:
         self._test_get_view_names(connection)
+
+    def test_get_table_names(
+        self, connection: dbapi.Connection
+    ) -> None:
+        self._test_get_table_names(connection)
 
 
 class TestAsyncConnection(BaseDBApiTestSuit):
@@ -404,3 +479,9 @@ class TestAsyncConnection(BaseDBApiTestSuit):
         self, connection: dbapi.AsyncConnection
     ) -> None:
         await greenlet_spawn(self._test_get_view_names, connection)
+
+    @pytest.mark.asyncio
+    async def test_get_table_names(
+        self, connection: dbapi.AsyncConnection
+    ) -> None:
+        await greenlet_spawn(self._test_get_table_names, connection)

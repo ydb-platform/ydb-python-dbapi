@@ -277,13 +277,18 @@ class Connection(BaseConnection):
     @handle_ydb_errors
     def get_table_names(self) -> list[str]:
         abs_dir_path = posixpath.join(self.database, self.table_path_prefix)
-        names = self._get_entity_names(abs_dir_path, ydb.SchemeEntryType.TABLE)
+        names = self._get_entity_names(
+            abs_dir_path,
+            [ydb.SchemeEntryType.TABLE, ydb.SchemeEntryType.COLUMN_TABLE],
+        )
         return [posixpath.relpath(path, abs_dir_path) for path in names]
 
     @handle_ydb_errors
     def get_view_names(self) -> list[str]:
         abs_dir_path = posixpath.join(self.database, self.table_path_prefix)
-        names = self._get_entity_names(abs_dir_path, ydb.SchemeEntryType.VIEW)
+        names = self._get_entity_names(
+            abs_dir_path, [ydb.SchemeEntryType.VIEW]
+        )
         return [posixpath.relpath(path, abs_dir_path) for path in names]
 
     def _check_path_exists(self, table_path: str) -> bool:
@@ -302,7 +307,7 @@ class Connection(BaseConnection):
             return True
 
     def _get_entity_names(
-        self, abs_dir_path: str, etype: ydb.SchemeEntryType
+        self, abs_dir_path: str, etypes: list[ydb.SchemeEntryType]
     ) -> list[str]:
         settings = self._get_request_settings()
 
@@ -316,10 +321,10 @@ class Connection(BaseConnection):
         result = []
         for child in directory.children:
             child_abs_path = posixpath.join(abs_dir_path, child.name)
-            if child.type == etype:
+            if child.type in etypes:
                 result.append(child_abs_path)
             elif child.is_directory() and not child.name.startswith("."):
-                result.extend(self._get_entity_names(child_abs_path, etype))
+                result.extend(self._get_entity_names(child_abs_path, etypes))
         return result
 
     @handle_ydb_errors
@@ -462,7 +467,7 @@ class AsyncConnection(BaseConnection):
         abs_dir_path = posixpath.join(self.database, self.table_path_prefix)
         names = await self._get_entity_names(
             abs_dir_path,
-            ydb.SchemeEntryType.TABLE,
+            [ydb.SchemeEntryType.TABLE, ydb.SchemeEntryType.COLUMN_TABLE],
         )
         return [posixpath.relpath(path, abs_dir_path) for path in names]
 
@@ -471,7 +476,7 @@ class AsyncConnection(BaseConnection):
         abs_dir_path = posixpath.join(self.database, self.table_path_prefix)
         names = await self._get_entity_names(
             abs_dir_path,
-            ydb.SchemeEntryType.VIEW,
+            [ydb.SchemeEntryType.VIEW],
         )
         return [posixpath.relpath(path, abs_dir_path) for path in names]
 
@@ -492,7 +497,7 @@ class AsyncConnection(BaseConnection):
             return True
 
     async def _get_entity_names(
-        self, abs_dir_path: str, etype: ydb.SchemeEntryType
+        self, abs_dir_path: str, etypes: list[ydb.SchemeEntryType]
     ) -> list[str]:
         settings = self._get_request_settings()
 
@@ -506,11 +511,11 @@ class AsyncConnection(BaseConnection):
         result = []
         for child in directory.children:
             child_abs_path = posixpath.join(abs_dir_path, child.name)
-            if child.type == etype:
+            if child.type in etypes:
                 result.append(child_abs_path)
             elif child.is_directory() and not child.name.startswith("."):
                 result.extend(
-                    await self._get_entity_names(child_abs_path, etype)
+                    await self._get_entity_names(child_abs_path, etypes)
                 )
         return result
 
