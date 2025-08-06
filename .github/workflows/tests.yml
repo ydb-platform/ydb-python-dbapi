@@ -42,6 +42,12 @@ jobs:
         run: |
           poetry install
 
+      - name: Run docker compose
+        uses: hoverkraft-tech/compose-action@v2.0.1
+        with:
+          compose-file: "./.github/docker/docker-compose.yml"
+          up-flags: "--wait"
+
       - name: Run tests
         run: |
           poetry run pytest tests

@@ -1,3 +1,5 @@
+* Bump ydb depencency to 3.21.6
+
 ## 0.1.12 ##
 * Ability to get view names
 
