@@ -1,4 +1,4 @@
-* Bump ydb depencency to 3.21.6
+* Get column table names
 
 ## 0.1.12 ##
 * Ability to get view names
