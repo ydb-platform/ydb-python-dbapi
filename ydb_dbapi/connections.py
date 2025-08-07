@@ -74,6 +74,7 @@ class BaseConnection:
         credentials: ydb.Credentials | dict | str | None = None,
         ydb_session_pool: SessionPool | AsyncSessionPool | None = None,
         root_certificates_path: str | None = None,
+        root_certificates: str | None = None,
         **kwargs: dict,
     ) -> None:
         protocol = protocol if protocol else "grpc"
@@ -97,14 +98,17 @@ class BaseConnection:
             self._session_pool._query_client_settings = settings
             self._driver = self._session_pool._driver
         else:
+            if root_certificates is None:
+                root_certificates = ydb.load_ydb_root_certificate(
+                    root_certificates_path
+                )
+
             driver_config = ydb.DriverConfig(
                 endpoint=self.endpoint,
                 database=self.database,
                 credentials=self.credentials,
                 query_client_settings=self._get_client_settings(),
-                root_certificates=ydb.load_ydb_root_certificate(
-                    root_certificates_path
-                ),
+                root_certificates=root_certificates,
             )
             self._driver = self._driver_cls(driver_config)
             self._session_pool = self._pool_cls(self._driver, size=5)
@@ -181,6 +185,7 @@ class Connection(BaseConnection):
         credentials: ydb.Credentials | None = None,
         ydb_session_pool: SessionPool | AsyncSessionPool | None = None,
         root_certificates_path: str | None = None,
+        root_certificates: str | None = None,
         **kwargs: dict,
     ) -> None:
         super().__init__(
@@ -192,6 +197,7 @@ class Connection(BaseConnection):
             credentials=credentials,
             ydb_session_pool=ydb_session_pool,
             root_certificates_path=root_certificates_path,
+            root_certificates=root_certificates,
             **kwargs,
         )
         self._current_cursor: Cursor | None = None
@@ -369,6 +375,7 @@ class AsyncConnection(BaseConnection):
         credentials: ydb.Credentials | None = None,
         ydb_session_pool: SessionPool | AsyncSessionPool | None = None,
         root_certificates_path: str | None = None,
+        root_certificates: str | None = None,
         **kwargs: dict,
     ) -> None:
         super().__init__(
@@ -380,6 +387,7 @@ class AsyncConnection(BaseConnection):
             credentials=credentials,
             ydb_session_pool=ydb_session_pool,
             root_certificates_path=root_certificates_path,
+            root_certificates=root_certificates,
             **kwargs,
         )
         self._current_cursor: AsyncCursor | None = None
