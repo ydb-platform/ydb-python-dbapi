@@ -1,3 +1,5 @@
+* Add root_certificates argument for connection
+
 ## 0.1.13 ##
 * Get column table names
 
