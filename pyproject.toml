@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "ydb-dbapi"
-version = "0.1.13"  # AUTOVERSION
+version = "0.1.14"  # AUTOVERSION
 description = "YDB Python DBAPI which complies with PEP 249"
 authors = ["Yandex LLC <ydb@yandex-team.ru>"]
 readme = "README.md"

@@ -1,3 +1,4 @@
+## 0.1.14 ##
 * Add root_certificates argument for connection
 
 ## 0.1.13 ##
