@@ -104,7 +104,7 @@ jobs:
 
         CHANGELOG="$CHANGELOG
 
-        Full Changelog: [$LAST_TAG...$TAG](https://github.com/ydb-platform/ydb-sqlalchemy/compare/$LAST_TAG...$TAG)"
+        Full Changelog: [$LAST_TAG...$TAG](https://github.com/ydb-platform/ydb-python-dbapi/compare/$LAST_TAG...$TAG)"
         if [ "$WITH_BETA" = true ]
         then
           gh release create --prerelease $TAG --title "$TAG" --notes "$CHANGELOG"
@@ -113,4 +113,4 @@ jobs:
         fi;
 
     - name: Publish package
-      uses: pypa/gh-action-pypi-publish@release/v1.8
+      uses: pypa/gh-action-pypi-publish@release/v1.13
