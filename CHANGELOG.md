@@ -1,4 +1,3 @@
-## 0.1.15 ##
 * Fix connection lifecycle
 
 ## 0.1.14 ##
