@@ -1,3 +1,5 @@
+* Fix connection lifecycle
+
 ## 0.1.14 ##
 * Add root_certificates argument for connection
 
