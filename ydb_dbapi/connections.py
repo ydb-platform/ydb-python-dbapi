@@ -234,20 +234,22 @@ class Connection(BaseConnection):
 
     @handle_ydb_errors
     def commit(self) -> None:
-        if self._tx_context and self._tx_context.tx_id:
+        if self._tx_context:
             settings = self._get_request_settings()
             self._tx_context.commit(settings=settings)
-            self._session_pool.release(self._session)
             self._tx_context = None
+        if self._session:
+            self._session_pool.release(self._session)
             self._session = None
 
     @handle_ydb_errors
     def rollback(self) -> None:
-        if self._tx_context and self._tx_context.tx_id:
+        if self._tx_context:
             settings = self._get_request_settings()
             self._tx_context.rollback(settings=settings)
-            self._session_pool.release(self._session)
             self._tx_context = None
+        if self._session:
+            self._session_pool.release(self._session)
             self._session = None
 
     @handle_ydb_errors
@@ -424,21 +426,23 @@ class AsyncConnection(BaseConnection):
 
     @handle_ydb_errors
     async def commit(self) -> None:
-        if self._session and self._tx_context and self._tx_context.tx_id:
+        if self._tx_context:
             settings = self._get_request_settings()
             await self._tx_context.commit(settings=settings)
+            self._tx_context = None
+        if self._session:
             await self._session_pool.release(self._session)
             self._session = None
-            self._tx_context = None
 
     @handle_ydb_errors
     async def rollback(self) -> None:
-        if self._session and self._tx_context and self._tx_context.tx_id:
+        if self._tx_context:
             settings = self._get_request_settings()
             await self._tx_context.rollback(settings=settings)
+            self._tx_context = None
+        if self._session:
             await self._session_pool.release(self._session)
             self._session = None
-            self._tx_context = None
 
     @handle_ydb_errors
     async def close(self) -> None:
