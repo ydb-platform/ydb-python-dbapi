@@ -50,6 +50,22 @@ class BaseDBApiTestSuit:
 
         maybe_await(cursor.execute_scheme("DROP TABLE foo"))
 
+    def _test_commit_rollback_after_begin(
+        self,
+        connection: dbapi.Connection,
+        isolation_level: str,
+    ) -> None:
+        connection.set_isolation_level(isolation_level)
+
+        for _ in range(10):
+            maybe_await(connection.begin())
+            maybe_await(connection.commit())
+
+        for _ in range(10):
+            maybe_await(connection.begin())
+            maybe_await(connection.rollback())
+
+
     def _test_connection(self, connection: dbapi.Connection) -> None:
         maybe_await(connection.commit())
         maybe_await(connection.rollback())
@@ -377,6 +393,26 @@ class TestConnection(BaseDBApiTestSuit):
             connection, isolation_level, read_only
         )
 
+    @pytest.mark.parametrize(
+        ("isolation_level"),
+        [
+            (dbapi.IsolationLevel.SERIALIZABLE),
+            (dbapi.IsolationLevel.AUTOCOMMIT),
+            (dbapi.IsolationLevel.ONLINE_READONLY),
+            (dbapi.IsolationLevel.ONLINE_READONLY_INCONSISTENT),
+            (dbapi.IsolationLevel.STALE_READONLY),
+            (dbapi.IsolationLevel.SNAPSHOT_READONLY),
+        ],
+    )
+    def test_commit_rollback_after_begin(
+        self,
+        isolation_level: str,
+        connection: dbapi.Connection,
+    ) -> None:
+        self._test_commit_rollback_after_begin(
+            connection, isolation_level
+        )
+
     def test_connection(self, connection: dbapi.Connection) -> None:
         self._test_connection(connection)
 
@@ -446,6 +482,29 @@ class TestAsyncConnection(BaseDBApiTestSuit):
             connection,
             isolation_level,
             read_only,
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("isolation_level"),
+        [
+            (dbapi.IsolationLevel.SERIALIZABLE),
+            (dbapi.IsolationLevel.AUTOCOMMIT),
+            (dbapi.IsolationLevel.ONLINE_READONLY),
+            (dbapi.IsolationLevel.ONLINE_READONLY_INCONSISTENT),
+            (dbapi.IsolationLevel.STALE_READONLY),
+            (dbapi.IsolationLevel.SNAPSHOT_READONLY),
+        ],
+    )
+    async def test_commit_rollback_after_begin(
+        self,
+        isolation_level: str,
+        connection: dbapi.AsyncConnection,
+    ) -> None:
+        await greenlet_spawn(
+            self._test_commit_rollback_after_begin,
+            connection,
+            isolation_level
         )
 
     @pytest.mark.asyncio
