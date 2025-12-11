@@ -1,3 +1,5 @@
+* Add ability to propagate RetrySettings
+
 ## 0.1.15 ##
 * Fix connection lifecycle
 
