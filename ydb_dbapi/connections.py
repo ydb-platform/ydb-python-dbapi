@@ -117,6 +117,7 @@ class BaseConnection:
         self.request_settings: ydb.BaseRequestSettings = (
             ydb.BaseRequestSettings()
         )
+        self.retry_settings: ydb.RetrySettings = ydb.RetrySettings()
 
     def set_isolation_level(self, isolation_level: IsolationLevel) -> None:
         if self._tx_context and self._tx_context.tx_id:
@@ -150,6 +151,12 @@ class BaseConnection:
 
     def get_ydb_request_settings(self) -> ydb.BaseRequestSettings:
         return self.request_settings
+
+    def set_ydb_retry_settings(self, value: ydb.RetrySettings) -> None:
+        self.retry_settings = value
+
+    def get_ydb_retry_settings(self) -> ydb.RetrySettings:
+        return self.retry_settings
 
     def _get_request_settings(self) -> ydb.BaseRequestSettings:
         settings = self.request_settings.make_copy()
@@ -210,6 +217,7 @@ class Connection(BaseConnection):
             tx_context=self._tx_context,
             table_path_prefix=self.table_path_prefix,
             request_settings=self.request_settings,
+            retry_settings=self.retry_settings,
         )
 
     def wait_ready(self, timeout: int = 10) -> None:
@@ -402,6 +410,7 @@ class AsyncConnection(BaseConnection):
             tx_context=self._tx_context,
             table_path_prefix=self.table_path_prefix,
             request_settings=self.request_settings,
+            retry_settings=self.retry_settings,
         )
 
     async def wait_ready(self, timeout: int = 10) -> None:
