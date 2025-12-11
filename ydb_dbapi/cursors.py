@@ -199,6 +199,7 @@ class Cursor(BufferedCursor):
         session_pool: ydb.QuerySessionPool,
         tx_mode: ydb.BaseQueryTxMode,
         request_settings: ydb.BaseRequestSettings,
+        retry_settings: ydb.RetrySettings,
         tx_context: ydb.QueryTxContext | None = None,
         table_path_prefix: str = "",
     ) -> None:
@@ -207,9 +208,9 @@ class Cursor(BufferedCursor):
         self._session_pool = session_pool
         self._tx_mode = tx_mode
         self._request_settings = request_settings
+        self._retry_settings = retry_settings
         self._tx_context = tx_context
         self._table_path_prefix = table_path_prefix
-
         self._stream: Iterator | None = None
 
     def fetchone(self) -> tuple | None:
@@ -253,7 +254,10 @@ class Cursor(BufferedCursor):
                 )
             )
 
-        return self._session_pool.retry_operation_sync(callee)
+        return self._session_pool.retry_operation_sync(
+            callee,
+            retry_settings=self._retry_settings,
+        )
 
     @handle_ydb_errors
     @invalidate_cursor_on_ydb_error
@@ -276,7 +280,10 @@ class Cursor(BufferedCursor):
                 )
             )
 
-        return self._session_pool.retry_operation_sync(callee)
+        return self._session_pool.retry_operation_sync(
+            callee,
+            retry_settings=self._retry_settings,
+        )
 
     @handle_ydb_errors
     @invalidate_cursor_on_ydb_error
@@ -369,6 +376,7 @@ class AsyncCursor(BufferedCursor):
         session_pool: ydb.aio.QuerySessionPool,
         tx_mode: ydb.BaseQueryTxMode,
         request_settings: ydb.BaseRequestSettings,
+        retry_settings: ydb.RetrySettings,
         tx_context: ydb.aio.QueryTxContext | None = None,
         table_path_prefix: str = "",
     ) -> None:
@@ -377,9 +385,9 @@ class AsyncCursor(BufferedCursor):
         self._session_pool = session_pool
         self._tx_mode = tx_mode
         self._request_settings = request_settings
+        self._retry_settings = retry_settings
         self._tx_context = tx_context
         self._table_path_prefix = table_path_prefix
-
         self._stream: AsyncIterator | None = None
 
     def fetchone(self) -> tuple | None:
@@ -423,7 +431,10 @@ class AsyncCursor(BufferedCursor):
                 )
             )
 
-        return await self._session_pool.retry_operation_async(callee)
+        return await self._session_pool.retry_operation_async(
+            callee,
+            retry_settings=self._retry_settings,
+        )
 
     @handle_ydb_errors
     @invalidate_cursor_on_ydb_error
@@ -446,7 +457,10 @@ class AsyncCursor(BufferedCursor):
                 )
             )
 
-        return await self._session_pool.retry_operation_async(callee)
+        return await self._session_pool.retry_operation_async(
+            callee,
+            retry_settings=self._retry_settings,
+        )
 
     @handle_ydb_errors
     @invalidate_cursor_on_ydb_error

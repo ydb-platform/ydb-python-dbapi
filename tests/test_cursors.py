@@ -166,6 +166,7 @@ class TestCursor(BaseCursorTestSuit):
             session_pool_sync,
             ydb.QuerySerializableReadWrite(),
             request_settings=ydb.BaseRequestSettings(),
+            retry_settings=ydb.RetrySettings(),
         )
         yield cursor
         cursor.close()
@@ -208,6 +209,7 @@ class TestAsyncCursor(BaseCursorTestSuit):
             session_pool,
             ydb.QuerySerializableReadWrite(),
             request_settings=ydb.BaseRequestSettings(),
+            retry_settings=ydb.RetrySettings(),
         )
         yield cursor
         cursor.close()
