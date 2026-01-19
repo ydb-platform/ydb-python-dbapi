@@ -1,3 +1,5 @@
+* SnapshotRW support
+
 ## 0.1.16 ##
 * Add ability to propagate RetrySettings
 
