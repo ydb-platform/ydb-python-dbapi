@@ -1390,14 +1390,14 @@ propcache = ">=0.2.0"
 
 [[package]]
 name = "ydb"
-version = "3.21.6"
+version = "3.23.2"
 description = "YDB Python SDK"
 optional = false
 python-versions = "*"
 groups = ["main"]
 files = [
-    {file = "ydb-3.21.6-py2.py3-none-any.whl", hash = "sha256:9847eedce30af31688eb55ede57dac417da1daaceb67c25452f991a843d13f1b"},
-    {file = "ydb-3.21.6.tar.gz", hash = "sha256:0465cd9a496d4454da88bb68516bec07e8701ed7aeb2d53d2e1934862bd67e12"},
+    {file = "ydb-3.23.2-py2.py3-none-any.whl", hash = "sha256:6a86afd4653070eed5eb23c126b051a5139685ab4fbff092d5805ceb6de4d554"},
+    {file = "ydb-3.23.2.tar.gz", hash = "sha256:1b0e9125ca20ce2c882b53c396c97cca56e36c0b1e79338de6136382864776d6"},
 ]
 
 [package.dependencies]
@@ -1412,4 +1412,4 @@ yc = ["yandexcloud"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.8"
-content-hash = "7f57bd632f9af7815cea0b19b10f4a688e93afd016e09a83069231be6c16013f"
+content-hash = "a096f136b1ad02f3ec3f71e499a9395a473b5a6aea9c233b6e00e653e63ae6e0"

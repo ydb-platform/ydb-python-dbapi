@@ -29,6 +29,7 @@ class IsolationLevel(str, Enum):
     ONLINE_READONLY_INCONSISTENT = "ONLINE READONLY INCONSISTENT"
     STALE_READONLY = "STALE READONLY"
     SNAPSHOT_READONLY = "SNAPSHOT READONLY"
+    SNAPSHOT_READWRITE = "SNAPSHOT READWRITE"
     AUTOCOMMIT = "AUTOCOMMIT"
 
 
@@ -56,6 +57,9 @@ _ydb_isolation_settings_map = {
     ),
     IsolationLevel.SNAPSHOT_READONLY: _IsolationSettings(
         ydb.QuerySnapshotReadOnly(), interactive=True
+    ),
+    IsolationLevel.SNAPSHOT_READWRITE: _IsolationSettings(
+        ydb.QuerySnapshotReadWrite(), interactive=True
     ),
 }
 

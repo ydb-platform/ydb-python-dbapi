@@ -381,6 +381,7 @@ class TestConnection(BaseDBApiTestSuit):
             (dbapi.IsolationLevel.ONLINE_READONLY_INCONSISTENT, True),
             (dbapi.IsolationLevel.STALE_READONLY, True),
             (dbapi.IsolationLevel.SNAPSHOT_READONLY, True),
+            (dbapi.IsolationLevel.SNAPSHOT_READWRITE, False),
         ],
     )
     def test_isolation_level_read_only(
@@ -402,6 +403,7 @@ class TestConnection(BaseDBApiTestSuit):
             (dbapi.IsolationLevel.ONLINE_READONLY_INCONSISTENT),
             (dbapi.IsolationLevel.STALE_READONLY),
             (dbapi.IsolationLevel.SNAPSHOT_READONLY),
+            (dbapi.IsolationLevel.SNAPSHOT_READWRITE),
         ],
     )
     def test_commit_rollback_after_begin(
@@ -469,6 +471,7 @@ class TestAsyncConnection(BaseDBApiTestSuit):
             (dbapi.IsolationLevel.ONLINE_READONLY_INCONSISTENT, True),
             (dbapi.IsolationLevel.STALE_READONLY, True),
             (dbapi.IsolationLevel.SNAPSHOT_READONLY, True),
+            (dbapi.IsolationLevel.SNAPSHOT_READWRITE, False),
         ],
     )
     async def test_isolation_level_read_only(
@@ -494,6 +497,7 @@ class TestAsyncConnection(BaseDBApiTestSuit):
             (dbapi.IsolationLevel.ONLINE_READONLY_INCONSISTENT),
             (dbapi.IsolationLevel.STALE_READONLY),
             (dbapi.IsolationLevel.SNAPSHOT_READONLY),
+            (dbapi.IsolationLevel.SNAPSHOT_READWRITE),
         ],
     )
     async def test_commit_rollback_after_begin(
