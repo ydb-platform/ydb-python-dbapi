@@ -1,3 +1,4 @@
+## 0.1.17 ##
 * SnapshotRW support
 
 ## 0.1.16 ##
