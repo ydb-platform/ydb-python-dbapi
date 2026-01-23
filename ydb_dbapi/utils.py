@@ -47,6 +47,7 @@ def handle_ydb_errors(func: Callable) -> Callable:  # noqa: C901
                 ydb.issues.SessionBusy,
                 ydb.issues.SessionExpired,
                 ydb.issues.SessionPoolEmpty,
+                ydb.issues.DeadlineExceed,
             ) as e:
                 raise OperationalError(e.message, original_error=e) from e
             except ydb.issues.GenericError as e:
@@ -85,6 +86,7 @@ def handle_ydb_errors(func: Callable) -> Callable:  # noqa: C901
             ydb.issues.SessionBusy,
             ydb.issues.SessionExpired,
             ydb.issues.SessionPoolEmpty,
+            ydb.issues.DeadlineExceed,
         ) as e:
             raise OperationalError(e.message, original_error=e) from e
         except ydb.issues.GenericError as e:

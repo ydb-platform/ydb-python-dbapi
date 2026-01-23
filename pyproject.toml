@@ -8,7 +8,7 @@ repository = "https://github.com/ydb-platform/ydb-python-dbapi/"
 
 [tool.poetry.dependencies]
 python = "^3.8"
-ydb = "^3.23.2"
+ydb = "^3.24.0"
 
 [tool.poetry.group.dev.dependencies]
 pre-commit = "^3.5.0"
