@@ -1,3 +1,5 @@
+* Add DeadlineExceeded as a OperationalError
+
 ## 0.1.17 ##
 * SnapshotRW support
 
