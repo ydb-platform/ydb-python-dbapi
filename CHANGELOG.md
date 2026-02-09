@@ -1,3 +1,5 @@
+* Ability to pass custom DriverConfig kwargs
+
 ## 0.1.18 ##
 * Add DeadlineExceeded as a OperationalError
 
