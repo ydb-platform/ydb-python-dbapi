@@ -372,6 +372,16 @@ class TestConnection(BaseDBApiTestSuit):
         finally:
             conn.close()
 
+    def test_connect_with_custom_driver_config_kwargs(
+        self, connection_kwargs: dict
+    ) -> None:
+        connection_kwargs["driver_config_kwargs"] = {
+            "grpc_keep_alive_timeout": 777,
+        }
+        connection = dbapi.connect(**connection_kwargs)
+        assert connection._driver._driver_config.grpc_keep_alive_timeout == 777
+        connection.close()
+
     @pytest.mark.parametrize(
         ("isolation_level", "read_only"),
         [
@@ -460,6 +470,17 @@ class TestAsyncConnection(BaseDBApiTestSuit):
                 maybe_await(conn.close())
 
             await greenlet_spawn(close)
+
+    @pytest.mark.asyncio
+    async def test_connect_with_custom_driver_config_kwargs(
+        self, connection_kwargs: dict
+    ) -> None:
+        connection_kwargs["driver_config_kwargs"] = {
+            "grpc_keep_alive_timeout": 777,
+        }
+        connection = await dbapi.async_connect(**connection_kwargs)
+        assert connection._driver._driver_config.grpc_keep_alive_timeout == 777
+        await connection.close()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
