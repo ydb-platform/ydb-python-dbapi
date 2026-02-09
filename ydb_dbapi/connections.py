@@ -79,6 +79,7 @@ class BaseConnection:
         ydb_session_pool: SessionPool | AsyncSessionPool | None = None,
         root_certificates_path: str | None = None,
         root_certificates: str | None = None,
+        driver_config_kwargs: dict | None = None,
         **kwargs: dict,
     ) -> None:
         protocol = protocol if protocol else "grpc"
@@ -88,6 +89,8 @@ class BaseConnection:
         self.table_path_prefix = ydb_table_path_prefix
 
         self.connection_kwargs: dict = kwargs
+
+        driver_config_kwargs = driver_config_kwargs or {}
 
         self._shared_session_pool: bool = False
 
@@ -113,6 +116,7 @@ class BaseConnection:
                 credentials=self.credentials,
                 query_client_settings=self._get_client_settings(),
                 root_certificates=root_certificates,
+                **driver_config_kwargs,
             )
             self._driver = self._driver_cls(driver_config)
             self._session_pool = self._pool_cls(self._driver, size=5)
@@ -197,6 +201,7 @@ class Connection(BaseConnection):
         ydb_session_pool: SessionPool | AsyncSessionPool | None = None,
         root_certificates_path: str | None = None,
         root_certificates: str | None = None,
+        driver_config_kwargs: dict | None = None,
         **kwargs: dict,
     ) -> None:
         super().__init__(
@@ -209,6 +214,7 @@ class Connection(BaseConnection):
             ydb_session_pool=ydb_session_pool,
             root_certificates_path=root_certificates_path,
             root_certificates=root_certificates,
+            driver_config_kwargs=driver_config_kwargs,
             **kwargs,
         )
         self._current_cursor: Cursor | None = None
@@ -390,6 +396,7 @@ class AsyncConnection(BaseConnection):
         ydb_session_pool: SessionPool | AsyncSessionPool | None = None,
         root_certificates_path: str | None = None,
         root_certificates: str | None = None,
+        driver_config_kwargs: dict | None = None,
         **kwargs: dict,
     ) -> None:
         super().__init__(
@@ -402,6 +409,7 @@ class AsyncConnection(BaseConnection):
             ydb_session_pool=ydb_session_pool,
             root_certificates_path=root_certificates_path,
             root_certificates=root_certificates,
+            driver_config_kwargs=driver_config_kwargs,
             **kwargs,
         )
         self._current_cursor: AsyncCursor | None = None
