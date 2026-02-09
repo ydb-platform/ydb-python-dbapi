@@ -1,3 +1,4 @@
+## 0.1.19 ##
 * Ability to pass custom DriverConfig kwargs
 
 ## 0.1.18 ##
