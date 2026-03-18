@@ -3,6 +3,7 @@ from __future__ import annotations
 import posixpath
 from collections.abc import Sequence
 from enum import Enum
+from typing import Any
 from typing import NamedTuple
 
 import ydb
@@ -21,6 +22,7 @@ from .errors import NotSupportedError
 from .utils import handle_ydb_errors
 from .utils import maybe_get_current_trace_id
 from .utils import prepare_credentials
+from .version import VERSION
 
 
 class IsolationLevel(str, Enum):
@@ -80,7 +82,7 @@ class BaseConnection:
         root_certificates_path: str | None = None,
         root_certificates: str | None = None,
         driver_config_kwargs: dict | None = None,
-        **kwargs: dict,
+        **kwargs: Any,
     ) -> None:
         protocol = protocol if protocol else "grpc"
         self.endpoint = f"{protocol}://{host}:{port}"
@@ -110,12 +112,24 @@ class BaseConnection:
                     root_certificates_path
                 )
 
+            _additional_sdk_headers: tuple[str, ...] = ()
+            if "_additional_sdk_headers" in kwargs:
+                val = kwargs.pop("_additional_sdk_headers")
+                if isinstance(val, tuple):
+                    _additional_sdk_headers = val
+
+            framework_headers = (
+                f"ydb-dbapi/{VERSION}",
+                *_additional_sdk_headers,
+            )
+
             driver_config = ydb.DriverConfig(
                 endpoint=self.endpoint,
                 database=self.database,
                 credentials=self.credentials,
                 query_client_settings=self._get_client_settings(),
                 root_certificates=root_certificates,
+                _additional_sdk_headers=framework_headers,
                 **driver_config_kwargs,
             )
             self._driver = self._driver_cls(driver_config)
@@ -202,7 +216,7 @@ class Connection(BaseConnection):
         root_certificates_path: str | None = None,
         root_certificates: str | None = None,
         driver_config_kwargs: dict | None = None,
-        **kwargs: dict,
+        **kwargs: Any,
     ) -> None:
         super().__init__(
             host=host,
@@ -397,7 +411,7 @@ class AsyncConnection(BaseConnection):
         root_certificates_path: str | None = None,
         root_certificates: str | None = None,
         driver_config_kwargs: dict | None = None,
-        **kwargs: dict,
+        **kwargs: Any,
     ) -> None:
         super().__init__(
             host=host,
@@ -579,13 +593,13 @@ class AsyncConnection(BaseConnection):
             self._session = None
 
 
-def connect(*args: tuple, **kwargs: dict) -> Connection:
-    conn = Connection(*args, **kwargs)  # type: ignore
+def connect(*args: Any, **kwargs: Any) -> Connection:
+    conn = Connection(*args, **kwargs)
     conn.wait_ready()
     return conn
 
 
-async def async_connect(*args: tuple, **kwargs: dict) -> AsyncConnection:
-    conn = AsyncConnection(*args, **kwargs)  # type: ignore
+async def async_connect(*args: Any, **kwargs: Any) -> AsyncConnection:
+    conn = AsyncConnection(*args, **kwargs)
     await conn.wait_ready()
     return conn
