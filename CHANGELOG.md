@@ -1,3 +1,5 @@
+* Pass self and parent versions to sdk header
+
 ## 0.1.19 ##
 * Ability to pass custom DriverConfig kwargs
 
