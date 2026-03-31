@@ -82,6 +82,7 @@ class BaseConnection:
         root_certificates_path: str | None = None,
         root_certificates: str | None = None,
         driver_config_kwargs: dict | None = None,
+        pyformat: bool = False,
         **kwargs: Any,
     ) -> None:
         protocol = protocol if protocol else "grpc"
@@ -89,6 +90,7 @@ class BaseConnection:
         self.credentials = prepare_credentials(credentials)
         self.database = database
         self.table_path_prefix = ydb_table_path_prefix
+        self.pyformat = pyformat
 
         self.connection_kwargs: dict = kwargs
 
@@ -216,6 +218,7 @@ class Connection(BaseConnection):
         root_certificates_path: str | None = None,
         root_certificates: str | None = None,
         driver_config_kwargs: dict | None = None,
+        pyformat: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(
@@ -229,6 +232,7 @@ class Connection(BaseConnection):
             root_certificates_path=root_certificates_path,
             root_certificates=root_certificates,
             driver_config_kwargs=driver_config_kwargs,
+            pyformat=pyformat,
             **kwargs,
         )
         self._current_cursor: Cursor | None = None
@@ -242,6 +246,7 @@ class Connection(BaseConnection):
             table_path_prefix=self.table_path_prefix,
             request_settings=self.request_settings,
             retry_settings=self.retry_settings,
+            pyformat=self.pyformat,
         )
 
     def wait_ready(self, timeout: int = 10) -> None:
@@ -411,6 +416,7 @@ class AsyncConnection(BaseConnection):
         root_certificates_path: str | None = None,
         root_certificates: str | None = None,
         driver_config_kwargs: dict | None = None,
+        pyformat: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(
@@ -424,6 +430,7 @@ class AsyncConnection(BaseConnection):
             root_certificates_path=root_certificates_path,
             root_certificates=root_certificates,
             driver_config_kwargs=driver_config_kwargs,
+            pyformat=pyformat,
             **kwargs,
         )
         self._current_cursor: AsyncCursor | None = None
@@ -437,6 +444,7 @@ class AsyncConnection(BaseConnection):
             table_path_prefix=self.table_path_prefix,
             request_settings=self.request_settings,
             retry_settings=self.retry_settings,
+            pyformat=self.pyformat,
         )
 
     async def wait_ready(self, timeout: int = 10) -> None:
@@ -593,13 +601,65 @@ class AsyncConnection(BaseConnection):
             self._session = None
 
 
-def connect(*args: Any, **kwargs: Any) -> Connection:
-    conn = Connection(*args, **kwargs)
+def connect(
+    host: str = "",
+    port: str = "",
+    database: str = "",
+    ydb_table_path_prefix: str = "",
+    protocol: str | None = None,
+    credentials: ydb.Credentials | dict | str | None = None,
+    ydb_session_pool: SessionPool | AsyncSessionPool | None = None,
+    root_certificates_path: str | None = None,
+    root_certificates: str | None = None,
+    driver_config_kwargs: dict | None = None,
+    pyformat: bool = False,
+    **kwargs: Any,
+) -> Connection:
+    conn = Connection(
+        host=host,
+        port=port,
+        database=database,
+        ydb_table_path_prefix=ydb_table_path_prefix,
+        protocol=protocol,
+        credentials=credentials,
+        ydb_session_pool=ydb_session_pool,
+        root_certificates_path=root_certificates_path,
+        root_certificates=root_certificates,
+        driver_config_kwargs=driver_config_kwargs,
+        pyformat=pyformat,
+        **kwargs,
+    )
     conn.wait_ready()
     return conn
 
 
-async def async_connect(*args: Any, **kwargs: Any) -> AsyncConnection:
-    conn = AsyncConnection(*args, **kwargs)
+async def async_connect(
+    host: str = "",
+    port: str = "",
+    database: str = "",
+    ydb_table_path_prefix: str = "",
+    protocol: str | None = None,
+    credentials: ydb.Credentials | dict | str | None = None,
+    ydb_session_pool: SessionPool | AsyncSessionPool | None = None,
+    root_certificates_path: str | None = None,
+    root_certificates: str | None = None,
+    driver_config_kwargs: dict | None = None,
+    pyformat: bool = False,
+    **kwargs: Any,
+) -> AsyncConnection:
+    conn = AsyncConnection(
+        host=host,
+        port=port,
+        database=database,
+        ydb_table_path_prefix=ydb_table_path_prefix,
+        protocol=protocol,
+        credentials=credentials,
+        ydb_session_pool=ydb_session_pool,
+        root_certificates_path=root_certificates_path,
+        root_certificates=root_certificates,
+        driver_config_kwargs=driver_config_kwargs,
+        pyformat=pyformat,
+        **kwargs,
+    )
     await conn.wait_ready()
     return conn
