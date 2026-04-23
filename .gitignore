@@ -133,3 +133,11 @@ dmypy.json
 
 # VSCode
 .vscode
+
+# AI / coding assistants
+.claude/
+.codex/
+.aider*
+.roo/
+.windsurf/
+.augment/
