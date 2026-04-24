@@ -2760,14 +2760,14 @@ propcache = ">=0.2.1"
 
 [[package]]
 name = "ydb"
-version = "3.26.7"
+version = "3.28.2"
 description = "YDB Python SDK"
 optional = false
 python-versions = "*"
 groups = ["main"]
 files = [
-    {file = "ydb-3.26.7-py2.py3-none-any.whl", hash = "sha256:14f7e47ced588f449ac6d7b63de8ab7bf779e6df08d7724ebb62afaaab27024c"},
-    {file = "ydb-3.26.7.tar.gz", hash = "sha256:2e4fc1e7be9e225ea7bd7f5a97abbce648c3d89a16d549ad21ddef16e3f00dfd"},
+    {file = "ydb-3.28.2-py2.py3-none-any.whl", hash = "sha256:13511d59146a964207c7e13cb3de071a2b95fb5067e4b9e89c669c9e9bd39ee3"},
+    {file = "ydb-3.28.2.tar.gz", hash = "sha256:a27325289a2a0f69e7326b14084c5612634b0801aebba695850ed1591c728e07"},
 ]
 
 [package.dependencies]

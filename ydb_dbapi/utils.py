@@ -12,6 +12,7 @@ import ydb
 
 from .errors import DatabaseError
 from .errors import DataError
+from .errors import Error
 from .errors import IntegrityError
 from .errors import InternalError
 from .errors import NotSupportedError
@@ -26,6 +27,8 @@ def handle_ydb_errors(func: Callable) -> Callable:  # noqa: C901
         async def awrapper(*args: tuple, **kwargs: dict) -> Any:
             try:
                 return await func(*args, **kwargs)
+            except Error:
+                raise
             except (
                 ydb.issues.AlreadyExists,
                 ydb.issues.PreconditionFailed,
@@ -65,6 +68,8 @@ def handle_ydb_errors(func: Callable) -> Callable:  # noqa: C901
     def wrapper(*args: tuple, **kwargs: dict) -> Any:
         try:
             return func(*args, **kwargs)
+        except Error:
+            raise
         except (
             ydb.issues.AlreadyExists,
             ydb.issues.PreconditionFailed,

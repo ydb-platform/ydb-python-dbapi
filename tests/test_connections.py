@@ -65,7 +65,6 @@ class BaseDBApiTestSuit:
             maybe_await(connection.begin())
             maybe_await(connection.rollback())
 
-
     def _test_connection(self, connection: dbapi.Connection) -> None:
         maybe_await(connection.commit())
         maybe_await(connection.rollback())
@@ -100,9 +99,12 @@ class BaseDBApiTestSuit:
         with suppress(dbapi.DatabaseError):
             maybe_await(cur.execute_scheme("DROP TABLE test"))
 
-        maybe_await(cur.execute_scheme(
-            "CREATE TABLE test(id Int64 NOT NULL, text Utf8, PRIMARY KEY (id))"
-        ))
+        maybe_await(
+            cur.execute_scheme(
+                "CREATE TABLE test("
+                "id Int64 NOT NULL, text Utf8, PRIMARY KEY (id))"
+            )
+        )
 
         maybe_await(
             cur.execute(
@@ -421,9 +423,7 @@ class TestConnection(BaseDBApiTestSuit):
         isolation_level: str,
         connection: dbapi.Connection,
     ) -> None:
-        self._test_commit_rollback_after_begin(
-            connection, isolation_level
-        )
+        self._test_commit_rollback_after_begin(connection, isolation_level)
 
     def test_connection(self, connection: dbapi.Connection) -> None:
         self._test_connection(connection)
@@ -442,14 +442,10 @@ class TestConnection(BaseDBApiTestSuit):
     ) -> None:
         self._test_error_with_interactive_tx(connection)
 
-    def test_get_view_names(
-        self, connection: dbapi.Connection
-    ) -> None:
+    def test_get_view_names(self, connection: dbapi.Connection) -> None:
         self._test_get_view_names(connection)
 
-    def test_get_table_names(
-        self, connection: dbapi.Connection
-    ) -> None:
+    def test_get_table_names(self, connection: dbapi.Connection) -> None:
         self._test_get_table_names(connection)
 
 
@@ -527,9 +523,7 @@ class TestAsyncConnection(BaseDBApiTestSuit):
         connection: dbapi.AsyncConnection,
     ) -> None:
         await greenlet_spawn(
-            self._test_commit_rollback_after_begin,
-            connection,
-            isolation_level
+            self._test_commit_rollback_after_begin, connection, isolation_level
         )
 
     @pytest.mark.asyncio
