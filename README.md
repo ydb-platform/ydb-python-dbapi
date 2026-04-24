@@ -37,10 +37,32 @@ with connection.cursor() as cursor:
     rows = cursor.fetchall()
 ```
 
+For large result sets you can use a server-side cursor that streams result
+sets incrementally instead of buffering the whole response in memory:
+
+```python
+with connection.cursor(stream_results=True) as cursor:
+    cursor.execute("SELECT id, val FROM table")
+
+    for row in iter(cursor.fetchone, None):
+        ...
+```
+
 Usage of async connection:
 
 ```python
 async with async_connection.cursor() as cursor:
+    await cursor.execute("SELECT id, val FROM table")
+
+    row = await cursor.fetchone()
+    rows = await cursor.fetchmany(size=5)
+    rows = await cursor.fetchall()
+```
+
+Async streaming cursors are enabled with the same flag:
+
+```python
+async with async_connection.cursor(stream_results=True) as cursor:
     await cursor.execute("SELECT id, val FROM table")
 
     row = await cursor.fetchone()
