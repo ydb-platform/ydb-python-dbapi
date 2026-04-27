@@ -131,6 +131,47 @@ class BaseDBApiTestSuit:
 
         maybe_await(cur.close())
 
+    def _test_cursor_pyformat_query(
+        self,
+        connection: dbapi.Connection,
+    ) -> None:
+        cur = connection.cursor()
+
+        with suppress(dbapi.DatabaseError):
+            maybe_await(cur.execute_scheme("DROP TABLE test_pyformat"))
+
+        maybe_await(
+            cur.execute_scheme(
+                """
+                CREATE TABLE test_pyformat(
+                    id Int64 NOT NULL,
+                    text Utf8,
+                    PRIMARY KEY (id)
+                )
+                """
+            )
+        )
+
+        maybe_await(
+            cur.execute(
+                "UPSERT INTO test_pyformat(id, text) VALUES (%s, %s)",
+                [17, "seventeen"],
+            )
+        )
+        maybe_await(
+            cur.execute(
+                "SELECT text FROM test_pyformat WHERE id = %(id)s",
+                {"id": 17},
+            )
+        )
+
+        row = cur.fetchone()
+        assert row is not None
+        assert row[0] == "seventeen"
+
+        maybe_await(cur.execute_scheme("DROP TABLE test_pyformat"))
+        maybe_await(cur.close())
+
     def _test_errors(
         self,
         connection: dbapi.Connection,
@@ -431,6 +472,13 @@ class TestConnection(BaseDBApiTestSuit):
     def test_cursor_raw_query(self, connection: dbapi.Connection) -> None:
         self._test_cursor_raw_query(connection)
 
+    def test_cursor_pyformat_query(self, connection_kwargs: dict) -> None:
+        connection = dbapi.connect(**{**connection_kwargs, "pyformat": True})
+        try:
+            self._test_cursor_pyformat_query(connection)
+        finally:
+            connection.close()
+
     def test_errors(self, connection: dbapi.Connection) -> None:
         self._test_errors(connection)
 
@@ -541,6 +589,19 @@ class TestAsyncConnection(BaseDBApiTestSuit):
         self, connection: dbapi.AsyncConnection
     ) -> None:
         await greenlet_spawn(self._test_cursor_raw_query, connection)
+
+    @pytest.mark.asyncio
+    async def test_cursor_pyformat_query(
+        self,
+        connection_kwargs: dict,
+    ) -> None:
+        connection = await dbapi.async_connect(
+            **{**connection_kwargs, "pyformat": True}
+        )
+        try:
+            await greenlet_spawn(self._test_cursor_pyformat_query, connection)
+        finally:
+            await connection.close()
 
     @pytest.mark.asyncio
     async def test_errors(self, connection: dbapi.AsyncConnection) -> None:

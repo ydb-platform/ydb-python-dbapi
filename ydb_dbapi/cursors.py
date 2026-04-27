@@ -19,6 +19,7 @@ from .errors import DatabaseError
 from .errors import InterfaceError
 from .errors import ProgrammingError
 from .utils import CursorStatus
+from .utils import convert_query_parameters
 from .utils import handle_ydb_errors
 from .utils import maybe_get_current_trace_id
 
@@ -26,13 +27,17 @@ if TYPE_CHECKING:
     from .connections import AsyncConnection
     from .connections import Connection
 
-    ParametersType = dict[
-        str,
-        Union[
-            Any,
-            tuple[Any, Union[ydb.PrimitiveType, ydb.AbstractTypeBuilder]],
-            ydb.TypedValue,
+    ParametersType = Union[
+        dict[
+            str,
+            Union[
+                Any,
+                tuple[Any, Union[ydb.PrimitiveType, ydb.AbstractTypeBuilder]],
+                ydb.TypedValue,
+            ],
         ],
+        list[Any],
+        tuple[Any, ...],
     ]
 
 
@@ -202,6 +207,7 @@ class Cursor(BufferedCursor):
         retry_settings: ydb.RetrySettings,
         tx_context: ydb.QueryTxContext | None = None,
         table_path_prefix: str = "",
+        pyformat: bool = False,
     ) -> None:
         super().__init__()
         self._connection = connection
@@ -211,6 +217,7 @@ class Cursor(BufferedCursor):
         self._retry_settings = retry_settings
         self._tx_context = tx_context
         self._table_path_prefix = table_path_prefix
+        self._pyformat = pyformat
         self._stream: Iterator | None = None
 
     def fetchone(self) -> tuple | None:
@@ -328,6 +335,10 @@ class Cursor(BufferedCursor):
         self._raise_if_running()
 
         query = self._append_table_path_prefix(query)
+
+        if self._pyformat and parameters is not None:
+            query, parameters = convert_query_parameters(query, parameters)
+
         self._begin_query()
 
         if self._tx_context is not None:
@@ -379,6 +390,7 @@ class AsyncCursor(BufferedCursor):
         retry_settings: ydb.RetrySettings,
         tx_context: ydb.aio.QueryTxContext | None = None,
         table_path_prefix: str = "",
+        pyformat: bool = False,
     ) -> None:
         super().__init__()
         self._connection = connection
@@ -388,6 +400,7 @@ class AsyncCursor(BufferedCursor):
         self._retry_settings = retry_settings
         self._tx_context = tx_context
         self._table_path_prefix = table_path_prefix
+        self._pyformat = pyformat
         self._stream: AsyncIterator | None = None
 
     def fetchone(self) -> tuple | None:
@@ -505,6 +518,9 @@ class AsyncCursor(BufferedCursor):
         self._raise_if_running()
 
         query = self._append_table_path_prefix(query)
+
+        if self._pyformat and parameters is not None:
+            query, parameters = convert_query_parameters(query, parameters)
 
         self._begin_query()
 
