@@ -13,7 +13,6 @@ from typing import Callable
 from typing import Union
 
 import ydb
-from typing_extensions import Self
 
 from .errors import DatabaseError
 from .errors import InterfaceError
@@ -24,6 +23,8 @@ from .utils import handle_ydb_errors
 from .utils import maybe_get_current_trace_id
 
 if TYPE_CHECKING:
+    from typing_extensions import Self
+
     from .connections import AsyncConnection
     from .connections import Connection
 
