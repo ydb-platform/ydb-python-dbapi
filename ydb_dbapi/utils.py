@@ -125,6 +125,32 @@ def maybe_get_current_trace_id() -> str | None:
     return None
 
 
+def _credentials_from_dict(credentials: dict) -> ydb.Credentials:
+    username = credentials.get("username")
+    if username:
+        return ydb.StaticCredentials.from_user_password(
+            username, credentials.get("password")
+        )
+
+    token = credentials.get("token")
+    if token:
+        return ydb.AccessTokenCredentials(token)
+
+    service_account_json = credentials.get("service_account_json")
+    if service_account_json:
+        return ydb.iam.ServiceAccountCredentials.from_content(
+            json.dumps(service_account_json),
+        )
+
+    service_account_file = credentials.get("service_account_file")
+    if service_account_file:
+        return ydb.iam.ServiceAccountCredentials.from_file(
+            service_account_file
+        )
+
+    return ydb.AnonymousCredentials()
+
+
 def prepare_credentials(
     credentials: ydb.Credentials | dict | str | None,
 ) -> ydb.Credentials | None:
@@ -138,25 +164,7 @@ def prepare_credentials(
         credentials = json.loads(credentials)
 
     if isinstance(credentials, dict):
-        credentials = credentials or {}
-
-        username = credentials.get("username")
-        if username:
-            password = credentials.get("password")
-            return ydb.StaticCredentials.from_user_password(
-                username,
-                password,
-            )
-
-        token = credentials.get("token")
-        if token:
-            return ydb.AccessTokenCredentials(token)
-
-        service_account_json = credentials.get("service_account_json")
-        if service_account_json:
-            return ydb.iam.ServiceAccountCredentials.from_content(
-                json.dumps(service_account_json),
-            )
+        return _credentials_from_dict(credentials)
 
     return ydb.AnonymousCredentials()
 
