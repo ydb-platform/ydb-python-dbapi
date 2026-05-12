@@ -1,3 +1,5 @@
+* Service Account file credentials support
+
 ## 0.1.21 ##
 * Fix: move typing_extensions import under TYPE_CHECKING
 
