@@ -7,9 +7,14 @@ import importlib.util
 import json
 import re
 from enum import Enum
+from inspect import Parameter
 from inspect import iscoroutinefunction
+from inspect import signature
 from typing import Any
 from typing import Callable
+from typing import Union
+from typing import get_args
+from typing import get_origin
 
 import ydb
 
@@ -167,6 +172,128 @@ def prepare_credentials(
         return _credentials_from_dict(credentials)
 
     return ydb.AnonymousCredentials()
+
+
+# Built by the connection itself: accepting them from the caller would
+# silently override the value the connection is constructed with.
+_RESERVED_DRIVER_CONFIG_PARAMS = frozenset(
+    {
+        "endpoint",
+        "database",
+        "credentials",
+        "root_certificates",
+        "query_client_settings",
+        "_additional_sdk_headers",
+    }
+)
+
+_TRUE_STRINGS = frozenset({"1", "on", "true", "yes"})
+_FALSE_STRINGS = frozenset({"0", "off", "false", "no"})
+
+
+def _driver_config_params() -> dict[str, Parameter]:
+    # Ask the SDK instead of keeping a list here: DriverConfig gains
+    # parameters over time, and a stale copy would reject valid ones.
+    params = signature(ydb.DriverConfig.__init__).parameters
+    return {
+        name: param
+        for name, param in params.items()
+        if name != "self" and name not in _RESERVED_DRIVER_CONFIG_PARAMS
+    }
+
+
+def _driver_config_value_type(param: Parameter) -> type | None:
+    annotation = param.annotation
+    if get_origin(annotation) is Union:
+        args = [a for a in get_args(annotation) if a is not type(None)]
+        if len(args) == 1:
+            annotation = args[0]
+
+    if annotation in (bool, int, str):
+        return annotation
+
+    # Fallback for absent or stringified annotations. bool goes first,
+    # since bool is a subclass of int.
+    for candidate in (bool, int, str):
+        if isinstance(param.default, candidate):
+            return candidate
+
+    return None
+
+
+def _coerce_driver_config_value(
+    name: str, value: Any, param: Parameter
+) -> Any:
+    # Only strings are coerced. Query parameters of a SQLAlchemy URL
+    # always arrive as strings, so `disable_discovery=false` would
+    # otherwise be a non-empty, and therefore truthy, string.
+    if not isinstance(value, str):
+        return value
+
+    value_type = _driver_config_value_type(param)
+
+    if value_type is bool:
+        if value.lower() in _TRUE_STRINGS:
+            return True
+        if value.lower() in _FALSE_STRINGS:
+            return False
+        msg = f"Connection option {name!r} expects a boolean, got {value!r}."
+        raise ProgrammingError(msg)
+
+    if value_type is int:
+        try:
+            return int(value)
+        except ValueError:
+            msg = (
+                f"Connection option {name!r} expects an integer, "
+                f"got {value!r}."
+            )
+            raise ProgrammingError(msg) from None
+
+    if value_type is str:
+        return value
+
+    msg = (
+        f"Connection option {name!r} cannot be set from a string. "
+        "Pass it via the driver_config_kwargs argument of connect()."
+    )
+    raise ProgrammingError(msg)
+
+
+def prepare_driver_config_kwargs(
+    driver_config_kwargs: dict[str, Any] | None,
+    connect_kwargs: dict[str, Any],
+) -> dict[str, Any]:
+    """Route leftover connect() keywords into ydb.DriverConfig kwargs.
+
+    Whatever the driver does not accept is reported rather than dropped:
+    an option that never arrived must not be indistinguishable from one
+    that did not help.
+    """
+    known = _driver_config_params()
+
+    unknown = sorted(name for name in connect_kwargs if name not in known)
+    if unknown:
+        msg = (
+            f"Unknown connection option(s): {', '.join(unknown)}. "
+            f"Supported driver options: {', '.join(sorted(known))}."
+        )
+        raise ProgrammingError(msg)
+
+    result = dict(driver_config_kwargs or {})
+
+    duplicated = sorted(name for name in connect_kwargs if name in result)
+    if duplicated:
+        msg = (
+            f"Connection option(s) {', '.join(duplicated)} passed both "
+            "directly and via driver_config_kwargs."
+        )
+        raise ProgrammingError(msg)
+
+    for name, value in connect_kwargs.items():
+        result[name] = _coerce_driver_config_value(name, value, known[name])
+
+    return result
 
 
 # Order matters: bool before int, datetime before date (subclass checks).

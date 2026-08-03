@@ -460,6 +460,25 @@ class TestConnection(BaseDBApiTestSuit):
         assert connection._driver._driver_config.grpc_keep_alive_timeout == 777
         connection.close()
 
+    def test_connect_with_driver_option_as_keyword(
+        self, connection_kwargs: dict
+    ) -> None:
+        connection = dbapi.connect(
+            **connection_kwargs, grpc_keep_alive_timeout=777
+        )
+        assert connection._driver._driver_config.grpc_keep_alive_timeout == 777
+        connection.close()
+
+    def test_connect_with_driver_option_as_string(
+        self, connection_kwargs: dict
+    ) -> None:
+        # How a SQLAlchemy URL query parameter arrives.
+        connection = dbapi.connect(
+            **connection_kwargs, disable_discovery="false"
+        )
+        assert connection._driver._driver_config.disable_discovery is False
+        connection.close()
+
     @pytest.mark.parametrize(
         ("isolation_level", "read_only"),
         [
