@@ -103,6 +103,77 @@ class BaseDBApiTestSuit:
             session_pool.release = original_release
             tx_context.rollback = original_rollback
 
+    def _create_tx_context_table(self, connection: dbapi.Connection) -> None:
+        cur = connection.cursor()
+        maybe_await(
+            cur.execute_scheme(
+                """
+                DROP TABLE IF EXISTS test_tx_context;
+                CREATE TABLE test_tx_context (
+                id Int64 NOT NULL,
+                val Int64,
+                PRIMARY KEY(id)
+                )
+                """
+            )
+        )
+        maybe_await(cur.close())
+
+    def _count_tx_context_rows(self, connection: dbapi.Connection) -> int:
+        cur = connection.cursor()
+        maybe_await(cur.execute("SELECT COUNT(*) FROM test_tx_context"))
+        row = cur.fetchone()
+        maybe_await(cur.close())
+        assert row is not None
+        return row[0]
+
+    def _test_cursor_created_before_begin_uses_transaction(
+        self,
+        connection: dbapi.Connection,
+    ) -> None:
+        self._create_tx_context_table(connection)
+        connection.set_isolation_level(dbapi.IsolationLevel.SERIALIZABLE)
+
+        cur = connection.cursor()
+        maybe_await(connection.begin())
+        maybe_await(
+            cur.execute("INSERT INTO test_tx_context(id, val) VALUES (1, 1)")
+        )
+        maybe_await(connection.rollback())
+
+        assert self._count_tx_context_rows(connection) == 0
+
+        maybe_await(cur.close())
+        maybe_await(
+            connection.cursor().execute_scheme("DROP TABLE test_tx_context")
+        )
+
+    def _test_cursor_is_reusable_after_commit(
+        self,
+        connection: dbapi.Connection,
+    ) -> None:
+        self._create_tx_context_table(connection)
+        connection.set_isolation_level(dbapi.IsolationLevel.SERIALIZABLE)
+
+        maybe_await(connection.begin())
+        cur = connection.cursor()
+        maybe_await(
+            cur.execute("INSERT INTO test_tx_context(id, val) VALUES (1, 1)")
+        )
+        maybe_await(connection.commit())
+
+        # the finished transaction must not be reused by the same cursor
+        maybe_await(
+            cur.execute("INSERT INTO test_tx_context(id, val) VALUES (2, 2)")
+        )
+
+        assert self._count_tx_context_rows(connection) == 2
+
+        maybe_await(cur.close())
+        maybe_await(
+            connection.cursor().execute_scheme("DROP TABLE test_tx_context")
+        )
+
     def _test_connection(self, connection: dbapi.Connection) -> None:
         maybe_await(connection.commit())
         maybe_await(connection.rollback())
@@ -527,6 +598,16 @@ class TestConnection(BaseDBApiTestSuit):
     ) -> None:
         self._test_close_releases_session_after_rollback_error(connection)
 
+    def test_cursor_created_before_begin_uses_transaction(
+        self, connection: dbapi.Connection
+    ) -> None:
+        self._test_cursor_created_before_begin_uses_transaction(connection)
+
+    def test_cursor_is_reusable_after_commit(
+        self, connection: dbapi.Connection
+    ) -> None:
+        self._test_cursor_is_reusable_after_commit(connection)
+
     def test_connection(self, connection: dbapi.Connection) -> None:
         self._test_connection(connection)
 
@@ -647,6 +728,22 @@ class TestAsyncConnection(BaseDBApiTestSuit):
     ) -> None:
         await greenlet_spawn(
             self._test_close_releases_session_after_rollback_error, connection
+        )
+
+    @pytest.mark.asyncio
+    async def test_cursor_created_before_begin_uses_transaction(
+        self, connection: dbapi.AsyncConnection
+    ) -> None:
+        await greenlet_spawn(
+            self._test_cursor_created_before_begin_uses_transaction, connection
+        )
+
+    @pytest.mark.asyncio
+    async def test_cursor_is_reusable_after_commit(
+        self, connection: dbapi.AsyncConnection
+    ) -> None:
+        await greenlet_spawn(
+            self._test_cursor_is_reusable_after_commit, connection
         )
 
     @pytest.mark.asyncio

@@ -25,10 +25,14 @@ RESULT_SET_COUNT = 3
 
 
 class FakeSyncConnection:
+    _tx_context = None
+
     def _invalidate_session(self) -> None: ...
 
 
 class FakeAsyncConnection:
+    _tx_context = None
+
     async def _invalidate_session(self) -> None: ...
 
 
