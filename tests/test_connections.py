@@ -66,6 +66,37 @@ class BaseDBApiTestSuit:
             maybe_await(connection.rollback())
 
 
+    def _test_close_releases_session_after_rollback_error(
+        self,
+        connection: dbapi.Connection,
+    ) -> None:
+        connection.set_isolation_level(dbapi.IsolationLevel.SERIALIZABLE)
+        maybe_await(connection.begin())
+
+        acquired_session = connection._session
+        assert acquired_session is not None
+
+        released = []
+        original_release = connection._session_pool.release
+
+        def release(session: ydb.QuerySession) -> any:
+            released.append(session)
+            return original_release(session)
+
+        connection._session_pool.release = release
+
+        def failing_rollback(*args: any, **kwargs: any) -> None:
+            raise ydb.issues.BadSession("session is invalidated")
+
+        connection._tx_context.rollback = failing_rollback
+
+        with pytest.raises(dbapi.Error):
+            maybe_await(connection.close())
+
+        assert released == [acquired_session]
+        assert connection._session is None
+        assert connection._tx_context is None
+
     def _test_connection(self, connection: dbapi.Connection) -> None:
         maybe_await(connection.commit())
         maybe_await(connection.rollback())
@@ -466,6 +497,11 @@ class TestConnection(BaseDBApiTestSuit):
             connection, isolation_level
         )
 
+    def test_close_releases_session_after_rollback_error(
+        self, connection: dbapi.Connection
+    ) -> None:
+        self._test_close_releases_session_after_rollback_error(connection)
+
     def test_connection(self, connection: dbapi.Connection) -> None:
         self._test_connection(connection)
 
@@ -578,6 +614,14 @@ class TestAsyncConnection(BaseDBApiTestSuit):
             self._test_commit_rollback_after_begin,
             connection,
             isolation_level
+        )
+
+    @pytest.mark.asyncio
+    async def test_close_releases_session_after_rollback_error(
+        self, connection: dbapi.AsyncConnection
+    ) -> None:
+        await greenlet_spawn(
+            self._test_close_releases_session_after_rollback_error, connection
         )
 
     @pytest.mark.asyncio

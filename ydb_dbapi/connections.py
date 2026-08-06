@@ -291,14 +291,18 @@ class Connection(BaseConnection):
 
     @handle_ydb_errors
     def close(self) -> None:
-        self.rollback()
+        try:
+            self.rollback()
+        finally:
+            self._tx_context = None
 
-        if self._session:
-            self._session_pool.release(self._session)
+            if self._session:
+                self._session_pool.release(self._session)
+                self._session = None
 
-        if not self._shared_session_pool:
-            self._session_pool.stop()
-            self._driver.stop()
+            if not self._shared_session_pool:
+                self._session_pool.stop()
+                self._driver.stop()
 
     @handle_ydb_errors
     def describe(self, table_path: str) -> ydb.TableSchemeEntry:
@@ -489,14 +493,18 @@ class AsyncConnection(BaseConnection):
 
     @handle_ydb_errors
     async def close(self) -> None:
-        await self.rollback()
+        try:
+            await self.rollback()
+        finally:
+            self._tx_context = None
 
-        if self._session:
-            await self._session_pool.release(self._session)
+            if self._session:
+                await self._session_pool.release(self._session)
+                self._session = None
 
-        if not self._shared_session_pool:
-            await self._session_pool.stop()
-            await self._driver.stop()
+            if not self._shared_session_pool:
+                await self._session_pool.stop()
+                await self._driver.stop()
 
     @handle_ydb_errors
     async def describe(self, table_path: str) -> ydb.TableSchemeEntry:
