@@ -77,25 +77,31 @@ class BaseDBApiTestSuit:
         assert acquired_session is not None
 
         released = []
-        original_release = connection._session_pool.release
+        session_pool = connection._session_pool
+        tx_context = connection._tx_context
+        original_release = session_pool.release
+        original_rollback = tx_context.rollback
 
         def release(session: ydb.QuerySession) -> any:
             released.append(session)
             return original_release(session)
 
-        connection._session_pool.release = release
-
         def failing_rollback(*args: any, **kwargs: any) -> None:
             raise ydb.issues.BadSession("session is invalidated")
 
-        connection._tx_context.rollback = failing_rollback
+        session_pool.release = release
+        tx_context.rollback = failing_rollback
 
-        with pytest.raises(dbapi.Error):
-            maybe_await(connection.close())
+        try:
+            with pytest.raises(dbapi.Error):
+                maybe_await(connection.close())
 
-        assert released == [acquired_session]
-        assert connection._session is None
-        assert connection._tx_context is None
+            assert released == [acquired_session]
+            assert connection._session is None
+            assert connection._tx_context is None
+        finally:
+            session_pool.release = original_release
+            tx_context.rollback = original_rollback
 
     def _test_connection(self, connection: dbapi.Connection) -> None:
         maybe_await(connection.commit())
