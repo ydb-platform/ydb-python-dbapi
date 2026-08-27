@@ -19,9 +19,11 @@ from .cursors import Cursor
 from .errors import InterfaceError
 from .errors import InternalError
 from .errors import NotSupportedError
+from .errors import ProgrammingError
 from .utils import handle_ydb_errors
 from .utils import maybe_get_current_trace_id
 from .utils import prepare_credentials
+from .utils import prepare_driver_config_kwargs
 from .version import VERSION
 
 
@@ -94,7 +96,25 @@ class BaseConnection:
 
         self.connection_kwargs: dict = kwargs
 
-        driver_config_kwargs = driver_config_kwargs or {}
+        # Reserved for SDK integrations rather than a user-facing option,
+        # so it is taken out untouched before the remaining keywords are
+        # validated as driver ones.
+        _additional_sdk_headers: tuple[str, ...] = ()
+        if "_additional_sdk_headers" in kwargs:
+            val = kwargs.pop("_additional_sdk_headers")
+            if isinstance(val, tuple):
+                _additional_sdk_headers = val
+
+        if "auth_token" in kwargs and self.credentials is not None:
+            msg = (
+                "Both credentials and auth_token are set: auth_token "
+                "would silently override credentials."
+            )
+            raise ProgrammingError(msg)
+
+        driver_config_kwargs = prepare_driver_config_kwargs(
+            driver_config_kwargs, kwargs
+        )
 
         self._shared_session_pool: bool = False
 
@@ -103,6 +123,15 @@ class BaseConnection:
         self.interactive_transaction: bool = False
 
         if ydb_session_pool is not None:
+            if driver_config_kwargs:
+                names = ", ".join(sorted(driver_config_kwargs))
+                msg = (
+                    f"Driver option(s) {names} cannot be applied: "
+                    "ydb_session_pool comes with its own driver. "
+                    "Configure the driver before creating the pool."
+                )
+                raise ProgrammingError(msg)
+
             self._shared_session_pool = True
             self._session_pool = ydb_session_pool
             settings = self._get_client_settings()
@@ -113,12 +142,6 @@ class BaseConnection:
                 root_certificates = ydb.load_ydb_root_certificate(
                     root_certificates_path
                 )
-
-            _additional_sdk_headers: tuple[str, ...] = ()
-            if "_additional_sdk_headers" in kwargs:
-                val = kwargs.pop("_additional_sdk_headers")
-                if isinstance(val, tuple):
-                    _additional_sdk_headers = val
 
             framework_headers = (
                 f"ydb-dbapi/{VERSION}",
