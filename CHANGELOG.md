@@ -1,3 +1,4 @@
+## 0.1.23 ##
 * Read tx context from connection on cursor execute
 * Release session in close() even if rollback fails
 * Validate and route unknown connect() keywords
