@@ -206,7 +206,6 @@ class Cursor(BufferedCursor):
         tx_mode: ydb.BaseQueryTxMode,
         request_settings: ydb.BaseRequestSettings,
         retry_settings: ydb.RetrySettings,
-        tx_context: ydb.QueryTxContext | None = None,
         table_path_prefix: str = "",
         pyformat: bool = False,
     ) -> None:
@@ -216,10 +215,15 @@ class Cursor(BufferedCursor):
         self._tx_mode = tx_mode
         self._request_settings = request_settings
         self._retry_settings = retry_settings
-        self._tx_context = tx_context
         self._table_path_prefix = table_path_prefix
         self._pyformat = pyformat
         self._stream: Iterator | None = None
+
+    @property
+    def _tx_context(self) -> ydb.QueryTxContext | None:
+        # Read the transaction from the connection on every access: a cursor
+        # must not pin the transaction that was open when it was created.
+        return self._connection._tx_context
 
     def fetchone(self) -> tuple | None:
         return self._fetchone_from_buffer()
@@ -389,7 +393,6 @@ class AsyncCursor(BufferedCursor):
         tx_mode: ydb.BaseQueryTxMode,
         request_settings: ydb.BaseRequestSettings,
         retry_settings: ydb.RetrySettings,
-        tx_context: ydb.aio.QueryTxContext | None = None,
         table_path_prefix: str = "",
         pyformat: bool = False,
     ) -> None:
@@ -399,10 +402,15 @@ class AsyncCursor(BufferedCursor):
         self._tx_mode = tx_mode
         self._request_settings = request_settings
         self._retry_settings = retry_settings
-        self._tx_context = tx_context
         self._table_path_prefix = table_path_prefix
         self._pyformat = pyformat
         self._stream: AsyncIterator | None = None
+
+    @property
+    def _tx_context(self) -> ydb.aio.QueryTxContext | None:
+        # Read the transaction from the connection on every access: a cursor
+        # must not pin the transaction that was open when it was created.
+        return self._connection._tx_context
 
     def fetchone(self) -> tuple | None:
         return self._fetchone_from_buffer()
