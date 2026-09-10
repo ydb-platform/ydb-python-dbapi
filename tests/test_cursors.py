@@ -150,6 +150,41 @@ class BaseCursorTestSuit:
         assert cursor.fetchall() == []
         assert not maybe_await(cursor.nextset())
 
+    def _test_execute_replaces_unread_result(
+        self, cursor: Cursor | AsyncCursor
+    ) -> None:
+        maybe_await(cursor.execute("SELECT id FROM table ORDER BY id"))
+        assert cursor.rowcount == RESULT_SET_LENGTH
+
+        maybe_await(cursor.execute("SELECT 99 AS id"))
+
+        assert cursor.rowcount == 1
+        assert cursor.fetchall() == [(99,)]
+
+    def _test_execute_resets_consumed_result_count(
+        self, cursor: Cursor | AsyncCursor
+    ) -> None:
+        maybe_await(cursor.execute("SELECT id FROM table ORDER BY id"))
+        assert len(cursor.fetchall()) == RESULT_SET_LENGTH
+
+        maybe_await(cursor.execute("SELECT 99 AS id"))
+
+        assert cursor.rowcount == 1
+        assert cursor.fetchall() == [(99,)]
+
+    def _test_execute_resets_description_for_statement_without_result(
+        self, cursor: Cursor | AsyncCursor
+    ) -> None:
+        maybe_await(cursor.execute("SELECT id FROM table"))
+        assert cursor.description is not None
+
+        maybe_await(
+            cursor.execute("UPSERT INTO table (id, val) VALUES (100, 100)")
+        )
+
+        assert cursor.description is None
+        assert cursor.rowcount == -1
+
     def _test_cursor_state_after_error(
         self, cursor: Cursor | AsyncCursor
     ) -> None:
@@ -198,6 +233,21 @@ class TestCursor(BaseCursorTestSuit):
         self, sync_cursor: Cursor
     ) -> None:
         self._test_cursor_fetch_all_multiple_result_sets(sync_cursor)
+
+    def test_execute_replaces_unread_result(self, sync_cursor: Cursor) -> None:
+        self._test_execute_replaces_unread_result(sync_cursor)
+
+    def test_execute_resets_consumed_result_count(
+        self, sync_cursor: Cursor
+    ) -> None:
+        self._test_execute_resets_consumed_result_count(sync_cursor)
+
+    def test_execute_resets_description_for_statement_without_result(
+        self, sync_cursor: Cursor
+    ) -> None:
+        self._test_execute_resets_description_for_statement_without_result(
+            sync_cursor
+        )
 
     def test_cursor_state_after_error(self, sync_cursor: Cursor) -> None:
         self._test_cursor_state_after_error(sync_cursor)
@@ -252,6 +302,31 @@ class TestAsyncCursor(BaseCursorTestSuit):
     ) -> None:
         await greenlet_spawn(
             self._test_cursor_fetch_all_multiple_result_sets, async_cursor
+        )
+
+    @pytest.mark.asyncio
+    async def test_execute_replaces_unread_result(
+        self, async_cursor: AsyncCursor
+    ) -> None:
+        await greenlet_spawn(
+            self._test_execute_replaces_unread_result, async_cursor
+        )
+
+    @pytest.mark.asyncio
+    async def test_execute_resets_consumed_result_count(
+        self, async_cursor: AsyncCursor
+    ) -> None:
+        await greenlet_spawn(
+            self._test_execute_resets_consumed_result_count, async_cursor
+        )
+
+    @pytest.mark.asyncio
+    async def test_execute_resets_description_for_statement_without_result(
+        self, async_cursor: AsyncCursor
+    ) -> None:
+        await greenlet_spawn(
+            self._test_execute_resets_description_for_statement_without_result,
+            async_cursor,
         )
 
     @pytest.mark.asyncio
