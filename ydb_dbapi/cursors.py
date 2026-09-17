@@ -171,7 +171,13 @@ class BufferedCursor:
     def is_closed(self) -> bool:
         return self._state == CursorStatus.closed
 
+    def _reset_result(self) -> None:
+        self._rows = None
+        self._rows_count = -1
+        self._description = None
+
     def _begin_query(self) -> None:
+        self._reset_result()
         self._state = CursorStatus.running
 
     def _finish_query(self) -> None:
