@@ -46,6 +46,15 @@ def _get_column_type(type_obj: Any) -> str:
     return str(ydb.convert.type_to_native(type_obj))
 
 
+def _as_ydb_parameters(parameters: ParametersType | None) -> dict | None:
+    if parameters is not None and not isinstance(parameters, dict):
+        raise ProgrammingError(
+            "Native YDB parameters must be a dict. "
+            "Use pyformat=True with execute() for positional parameters."
+        )
+    return parameters
+
+
 def invalidate_cursor_on_ydb_error(func: Callable) -> Callable:
     if iscoroutinefunction(func):
 
@@ -257,7 +266,7 @@ class Cursor(BufferedCursor):
     @handle_ydb_errors
     @invalidate_cursor_on_ydb_error
     def _execute_generic_query(
-        self, query: str, parameters: ParametersType | None = None
+        self, query: str, parameters: dict | None = None
     ) -> list[ydb.convert.ResultSet]:
         settings = self._get_request_settings()
 
@@ -282,7 +291,7 @@ class Cursor(BufferedCursor):
     def _execute_session_query(
         self,
         query: str,
-        parameters: ParametersType | None = None,
+        parameters: dict | None = None,
     ) -> list[ydb.convert.ResultSet]:
         settings = self._get_request_settings()
 
@@ -309,7 +318,7 @@ class Cursor(BufferedCursor):
         self,
         tx_context: ydb.QueryTxContext,
         query: str,
-        parameters: ParametersType | None = None,
+        parameters: dict | None = None,
     ) -> list[ydb.convert.ResultSet]:
         settings = self._get_request_settings()
         return self._materialize(
@@ -329,10 +338,11 @@ class Cursor(BufferedCursor):
         self._raise_if_closed()
 
         query = self._append_table_path_prefix(query)
+        ydb_parameters = _as_ydb_parameters(parameters)
         self._begin_query()
 
         result_list = self._execute_generic_query(
-            query=query, parameters=parameters
+            query=query, parameters=ydb_parameters
         )
         self._fill_buffer(result_list)
         self._finish_query()
@@ -350,15 +360,18 @@ class Cursor(BufferedCursor):
         if self._pyformat and parameters is not None:
             query, parameters = convert_query_parameters(query, parameters)
 
+        ydb_parameters = _as_ydb_parameters(parameters)
         self._begin_query()
 
         if self._tx_context is not None:
             result_list = self._execute_transactional_query(
-                tx_context=self._tx_context, query=query, parameters=parameters
+                tx_context=self._tx_context,
+                query=query,
+                parameters=ydb_parameters,
             )
         else:
             result_list = self._execute_session_query(
-                query=query, parameters=parameters
+                query=query, parameters=ydb_parameters
             )
 
         self._fill_buffer(result_list)
@@ -444,7 +457,7 @@ class AsyncCursor(BufferedCursor):
     @handle_ydb_errors
     @invalidate_cursor_on_ydb_error
     async def _execute_generic_query(
-        self, query: str, parameters: ParametersType | None = None
+        self, query: str, parameters: dict | None = None
     ) -> list[ydb.convert.ResultSet]:
         settings = self._get_request_settings()
 
@@ -469,7 +482,7 @@ class AsyncCursor(BufferedCursor):
     async def _execute_session_query(
         self,
         query: str,
-        parameters: ParametersType | None = None,
+        parameters: dict | None = None,
     ) -> list[ydb.convert.ResultSet]:
         settings = self._get_request_settings()
 
@@ -496,7 +509,7 @@ class AsyncCursor(BufferedCursor):
         self,
         tx_context: ydb.aio.QueryTxContext,
         query: str,
-        parameters: ParametersType | None = None,
+        parameters: dict | None = None,
     ) -> list[ydb.convert.ResultSet]:
         settings = self._get_request_settings()
         return await self._materialize(
@@ -516,10 +529,11 @@ class AsyncCursor(BufferedCursor):
         self._raise_if_closed()
 
         query = self._append_table_path_prefix(query)
+        ydb_parameters = _as_ydb_parameters(parameters)
         self._begin_query()
 
         result_list = await self._execute_generic_query(
-            query=query, parameters=parameters
+            query=query, parameters=ydb_parameters
         )
         self._fill_buffer(result_list)
         self._finish_query()
@@ -537,15 +551,18 @@ class AsyncCursor(BufferedCursor):
         if self._pyformat and parameters is not None:
             query, parameters = convert_query_parameters(query, parameters)
 
+        ydb_parameters = _as_ydb_parameters(parameters)
         self._begin_query()
 
         if self._tx_context is not None:
             result_list = await self._execute_transactional_query(
-                tx_context=self._tx_context, query=query, parameters=parameters
+                tx_context=self._tx_context,
+                query=query,
+                parameters=ydb_parameters,
             )
         else:
             result_list = await self._execute_session_query(
-                query=query, parameters=parameters
+                query=query, parameters=ydb_parameters
             )
 
         self._fill_buffer(result_list)

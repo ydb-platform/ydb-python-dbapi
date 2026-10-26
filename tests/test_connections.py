@@ -65,7 +65,6 @@ class BaseDBApiTestSuit:
             maybe_await(connection.begin())
             maybe_await(connection.rollback())
 
-
     def _test_close_releases_session_after_rollback_error(
         self,
         connection: dbapi.Connection,
@@ -208,9 +207,12 @@ class BaseDBApiTestSuit:
         with suppress(dbapi.DatabaseError):
             maybe_await(cur.execute_scheme("DROP TABLE test"))
 
-        maybe_await(cur.execute_scheme(
-            "CREATE TABLE test(id Int64 NOT NULL, text Utf8, PRIMARY KEY (id))"
-        ))
+        maybe_await(
+            cur.execute_scheme(
+                "CREATE TABLE test("
+                "id Int64 NOT NULL, text Utf8, PRIMARY KEY (id))"
+            )
+        )
 
         maybe_await(
             cur.execute(
@@ -322,7 +324,24 @@ class BaseDBApiTestSuit:
         maybe_await(cur.execute_scheme("DROP TABLE test"))
         maybe_await(cur.close())
 
-    def _test_bulk_upsert(self, connection: dbapi.Connection) -> None:
+    def _test_native_parameters_require_dict(
+        self, connection: dbapi.Connection
+    ) -> None:
+        cursor = connection.cursor()
+        for method in (cursor.execute, cursor.execute_scheme):
+            for parameters in ([1], (1,), [], ()):
+                with pytest.raises(
+                    dbapi.ProgrammingError, match="parameters must be a dict"
+                ):
+                    maybe_await(method("SELECT 1", parameters))
+
+        maybe_await(cursor.execute("SELECT 1"))
+        assert cursor.fetchone() == (1,)
+        maybe_await(cursor.close())
+
+    def _test_bulk_upsert(
+        self, connection: dbapi.Connection, rows_type: type
+    ) -> None:
         cursor = connection.cursor()
         with suppress(dbapi.DatabaseError):
             maybe_await(cursor.execute_scheme("DROP TABLE pet"))
@@ -368,7 +387,9 @@ class BaseDBApiTestSuit:
             },
         ]
 
-        maybe_await(connection.bulk_upsert("pet", rows, column_types))
+        maybe_await(
+            connection.bulk_upsert("pet", rows_type(rows), column_types)
+        )
 
         maybe_await(cursor.execute("SELECT * FROM pet"))
         assert cursor.rowcount == 2
@@ -589,9 +610,7 @@ class TestConnection(BaseDBApiTestSuit):
         isolation_level: str,
         connection: dbapi.Connection,
     ) -> None:
-        self._test_commit_rollback_after_begin(
-            connection, isolation_level
-        )
+        self._test_commit_rollback_after_begin(connection, isolation_level)
 
     def test_close_releases_session_after_rollback_error(
         self, connection: dbapi.Connection
@@ -624,22 +643,26 @@ class TestConnection(BaseDBApiTestSuit):
     def test_errors(self, connection: dbapi.Connection) -> None:
         self._test_errors(connection)
 
-    def test_bulk_upsert(self, connection: dbapi.Connection) -> None:
-        self._test_bulk_upsert(connection)
+    def test_native_parameters_require_dict(
+        self, connection: dbapi.Connection
+    ) -> None:
+        self._test_native_parameters_require_dict(connection)
+
+    @pytest.mark.parametrize("rows_type", [list, tuple])
+    def test_bulk_upsert(
+        self, connection: dbapi.Connection, rows_type: type
+    ) -> None:
+        self._test_bulk_upsert(connection, rows_type)
 
     def test_errors_with_interactive_tx(
         self, connection: dbapi.Connection
     ) -> None:
         self._test_error_with_interactive_tx(connection)
 
-    def test_get_view_names(
-        self, connection: dbapi.Connection
-    ) -> None:
+    def test_get_view_names(self, connection: dbapi.Connection) -> None:
         self._test_get_view_names(connection)
 
-    def test_get_table_names(
-        self, connection: dbapi.Connection
-    ) -> None:
+    def test_get_table_names(self, connection: dbapi.Connection) -> None:
         self._test_get_table_names(connection)
 
 
@@ -717,9 +740,7 @@ class TestAsyncConnection(BaseDBApiTestSuit):
         connection: dbapi.AsyncConnection,
     ) -> None:
         await greenlet_spawn(
-            self._test_commit_rollback_after_begin,
-            connection,
-            isolation_level
+            self._test_commit_rollback_after_begin, connection, isolation_level
         )
 
     @pytest.mark.asyncio
@@ -774,10 +795,19 @@ class TestAsyncConnection(BaseDBApiTestSuit):
         await greenlet_spawn(self._test_errors, connection)
 
     @pytest.mark.asyncio
-    async def test_bulk_upsert(
+    async def test_native_parameters_require_dict(
         self, connection: dbapi.AsyncConnection
     ) -> None:
-        await greenlet_spawn(self._test_bulk_upsert, connection)
+        await greenlet_spawn(
+            self._test_native_parameters_require_dict, connection
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("rows_type", [list, tuple])
+    async def test_bulk_upsert(
+        self, connection: dbapi.AsyncConnection, rows_type: type
+    ) -> None:
+        await greenlet_spawn(self._test_bulk_upsert, connection, rows_type)
 
     @pytest.mark.asyncio
     async def test_errors_with_interactive_tx(

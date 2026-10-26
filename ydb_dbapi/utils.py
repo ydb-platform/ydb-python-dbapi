@@ -133,9 +133,10 @@ def maybe_get_current_trace_id() -> str | None:
 def _credentials_from_dict(credentials: dict) -> ydb.Credentials:
     username = credentials.get("username")
     if username:
-        return ydb.StaticCredentials.from_user_password(
-            username, credentials.get("password")
-        )
+        password = credentials.get("password")
+        if password is None:
+            password = ""
+        return ydb.StaticCredentials.from_user_password(username, password)
 
     token = credentials.get("token")
     if token:
@@ -409,14 +410,14 @@ def _validate_named_parameters(
 ) -> dict:
     if not isinstance(parameters, dict):
         raise ProgrammingError(
-            "Named placeholders (%(name)s) require parameters "
-            "to be a dict."
+            "Named placeholders (%(name)s) require parameters to be a dict."
         )
 
     expected_keys = set(named_placeholders)
     actual_keys = set(parameters)
     invalid_prefixed_keys = [
-        name for name in actual_keys
+        name
+        for name in actual_keys
         if isinstance(name, str) and name.startswith("$")
     ]
     if invalid_prefixed_keys:
