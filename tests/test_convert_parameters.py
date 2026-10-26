@@ -109,9 +109,7 @@ class TestNamedStyle:
         assert "$c" in p
 
     def test_percent_percent_escape(self):
-        q, _ = convert_query_parameters(
-            "SELECT %% as pct, %(x)s", {"x": 1}
-        )
+        q, _ = convert_query_parameters("SELECT %% as pct, %(x)s", {"x": 1})
         assert q == "SELECT % as pct, $x"
 
     def test_empty_params(self):
