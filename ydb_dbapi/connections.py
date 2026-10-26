@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import posixpath
+from abc import ABC
+from abc import abstractmethod
 from collections.abc import Sequence
 from enum import Enum
 from typing import Any
@@ -71,10 +73,7 @@ _ydb_isolation_settings_map = {
 }
 
 
-class BaseConnection:
-    _driver_cls = ydb.Driver
-    _pool_cls = ydb.QuerySessionPool
-
+class BaseConnection(ABC):
     def __init__(
         self,
         host: str = "",
@@ -85,7 +84,7 @@ class BaseConnection:
         credentials: ydb.Credentials | dict | str | None = None,
         ydb_session_pool: SessionPool | AsyncSessionPool | None = None,
         root_certificates_path: str | None = None,
-        root_certificates: str | None = None,
+        root_certificates: bytes | None = None,
         driver_config_kwargs: dict | None = None,
         pyformat: bool = False,
         **kwargs: Any,
@@ -160,14 +159,20 @@ class BaseConnection:
                 _additional_sdk_headers=framework_headers,
                 **driver_config_kwargs,
             )
-            self._driver = self._driver_cls(driver_config)
-            self._session_pool = self._pool_cls(self._driver, size=5)
+            self._session_pool = self._create_session_pool(driver_config)
+            self._driver = self._session_pool._driver
 
         self._session: ydb.QuerySession | ydb.aio.QuerySession | None = None
         self.request_settings: ydb.BaseRequestSettings = (
             ydb.BaseRequestSettings()
         )
         self.retry_settings: ydb.RetrySettings = ydb.RetrySettings()
+
+    @abstractmethod
+    def _create_session_pool(
+        self, driver_config: ydb.DriverConfig
+    ) -> SessionPool | AsyncSessionPool:
+        raise NotImplementedError
 
     def set_isolation_level(self, isolation_level: IsolationLevel) -> None:
         if self._tx_context and self._tx_context.tx_id:
@@ -185,7 +190,7 @@ class BaseConnection:
             if self.interactive_transaction:
                 return IsolationLevel.SERIALIZABLE
             return IsolationLevel.AUTOCOMMIT
-        if self._tx_mode.name == ydb.QueryOnlineReadOnly().name:
+        if isinstance(self._tx_mode, ydb.QueryOnlineReadOnly):
             if self._tx_mode.allow_inconsistent_reads:
                 return IsolationLevel.ONLINE_READONLY_INCONSISTENT
             return IsolationLevel.ONLINE_READONLY
@@ -232,6 +237,10 @@ class Connection(BaseConnection):
     _pool_cls = ydb.QuerySessionPool
     _cursor_cls = Cursor
     _stream_cursor_cls = StreamCursor
+    _driver: ydb.Driver
+    _session_pool: SessionPool
+    _session: ydb.QuerySession | None
+    _tx_context: TxContext | None
 
     def __init__(
         self,
@@ -241,9 +250,9 @@ class Connection(BaseConnection):
         ydb_table_path_prefix: str = "",
         protocol: str | None = None,
         credentials: ydb.Credentials | dict | str | None = None,
-        ydb_session_pool: SessionPool | AsyncSessionPool | None = None,
+        ydb_session_pool: SessionPool | None = None,
         root_certificates_path: str | None = None,
-        root_certificates: str | None = None,
+        root_certificates: bytes | None = None,
         driver_config_kwargs: dict | None = None,
         pyformat: bool = False,
         **kwargs: Any,
@@ -263,6 +272,12 @@ class Connection(BaseConnection):
             **kwargs,
         )
         self._current_cursor: Cursor | StreamCursor | None = None
+
+    def _create_session_pool(
+        self, driver_config: ydb.DriverConfig
+    ) -> SessionPool:
+        driver = self._driver_cls(driver_config)
+        return self._pool_cls(driver, size=5)
 
     def cursor(self, stream_results: bool = False) -> Cursor | StreamCursor:
         cursor_cls = (
@@ -433,6 +448,9 @@ class Connection(BaseConnection):
             self.database, self.table_path_prefix, table_name
         )
 
+        if not isinstance(rows, list):
+            rows = list(rows)
+
         self._driver.table_client.bulk_upsert(
             abs_table_path,
             rows=rows,
@@ -473,6 +491,10 @@ class AsyncConnection(BaseConnection):
     _pool_cls = ydb.aio.QuerySessionPool
     _cursor_cls = AsyncCursor
     _stream_cursor_cls = AsyncStreamCursor
+    _driver: ydb.aio.Driver
+    _session_pool: AsyncSessionPool
+    _session: ydb.aio.QuerySession | None
+    _tx_context: AsyncTxContext | None
 
     def __init__(
         self,
@@ -482,9 +504,9 @@ class AsyncConnection(BaseConnection):
         ydb_table_path_prefix: str = "",
         protocol: str | None = None,
         credentials: ydb.Credentials | dict | str | None = None,
-        ydb_session_pool: SessionPool | AsyncSessionPool | None = None,
+        ydb_session_pool: AsyncSessionPool | None = None,
         root_certificates_path: str | None = None,
-        root_certificates: str | None = None,
+        root_certificates: bytes | None = None,
         driver_config_kwargs: dict | None = None,
         pyformat: bool = False,
         **kwargs: Any,
@@ -504,6 +526,12 @@ class AsyncConnection(BaseConnection):
             **kwargs,
         )
         self._current_cursor: AsyncStreamCursor | None = None
+
+    def _create_session_pool(
+        self, driver_config: ydb.DriverConfig
+    ) -> AsyncSessionPool:
+        driver = self._driver_cls(driver_config)
+        return self._pool_cls(driver, size=5)
 
     def cursor(
         self, stream_results: bool = False
@@ -680,6 +708,9 @@ class AsyncConnection(BaseConnection):
             self.database, self.table_path_prefix, table_name
         )
 
+        if not isinstance(rows, list):
+            rows = list(rows)
+
         await self._driver.table_client.bulk_upsert(
             abs_table_path,
             rows=rows,
@@ -724,9 +755,9 @@ def connect(
     ydb_table_path_prefix: str = "",
     protocol: str | None = None,
     credentials: ydb.Credentials | dict | str | None = None,
-    ydb_session_pool: SessionPool | AsyncSessionPool | None = None,
+    ydb_session_pool: SessionPool | None = None,
     root_certificates_path: str | None = None,
-    root_certificates: str | None = None,
+    root_certificates: bytes | None = None,
     driver_config_kwargs: dict | None = None,
     pyformat: bool = False,
     **kwargs: Any,
@@ -756,9 +787,9 @@ async def async_connect(
     ydb_table_path_prefix: str = "",
     protocol: str | None = None,
     credentials: ydb.Credentials | dict | str | None = None,
-    ydb_session_pool: SessionPool | AsyncSessionPool | None = None,
+    ydb_session_pool: AsyncSessionPool | None = None,
     root_certificates_path: str | None = None,
-    root_certificates: str | None = None,
+    root_certificates: bytes | None = None,
     driver_config_kwargs: dict | None = None,
     pyformat: bool = False,
     **kwargs: Any,

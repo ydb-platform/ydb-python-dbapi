@@ -26,6 +26,11 @@ async_connection = await ydb_dbapi.async_connect(
 )  # async connection
 ```
 
+For TLS connections, pass PEM certificate contents as `bytes` through
+`root_certificates`, or use `root_certificates_path` to load them from a file.
+Shared session pools must match the connection API: `ydb.QuerySessionPool`
+for `connect()` and `ydb.aio.QuerySessionPool` for `async_connect()`.
+
 Usage of connection:
 
 ```python
@@ -176,8 +181,12 @@ YDB type.
 > `pyformat=True` at your earliest convenience.
 
 By default (`pyformat=False`) the driver passes the query and parameters
-directly to the YDB SDK without any transformation. Use `$name` placeholders
-in the query and supply a `dict` with `$`-prefixed keys:
+directly to the YDB SDK without any transformation.
+Passing a `list` or `tuple` in native mode raises `ProgrammingError`.
+Use `pyformat=True` with `execute()` for positional parameters.
+
+Use `$name` placeholders in the query and supply a `dict` with
+`$`-prefixed keys:
 
 ```python
 connection = ydb_dbapi.connect(

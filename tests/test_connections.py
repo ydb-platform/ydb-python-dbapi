@@ -419,7 +419,24 @@ class BaseDBApiTestSuit:
         maybe_await(cur.execute_scheme("DROP TABLE test"))
         maybe_await(cur.close())
 
-    def _test_bulk_upsert(self, connection: dbapi.Connection) -> None:
+    def _test_native_parameters_require_dict(
+        self, connection: dbapi.Connection
+    ) -> None:
+        cursor = connection.cursor()
+        for method in (cursor.execute, cursor.execute_scheme):
+            for parameters in ([1], (1,), [], ()):
+                with pytest.raises(
+                    dbapi.ProgrammingError, match="parameters must be a dict"
+                ):
+                    maybe_await(method("SELECT 1", parameters))
+
+        maybe_await(cursor.execute("SELECT 1"))
+        assert cursor.fetchone() == (1,)
+        maybe_await(cursor.close())
+
+    def _test_bulk_upsert(
+        self, connection: dbapi.Connection, rows_type: type
+    ) -> None:
         cursor = connection.cursor()
         with suppress(dbapi.DatabaseError):
             maybe_await(cursor.execute_scheme("DROP TABLE pet"))
@@ -465,7 +482,9 @@ class BaseDBApiTestSuit:
             },
         ]
 
-        maybe_await(connection.bulk_upsert("pet", rows, column_types))
+        maybe_await(
+            connection.bulk_upsert("pet", rows_type(rows), column_types)
+        )
 
         maybe_await(cursor.execute("SELECT * FROM pet"))
         assert cursor.rowcount == 2
@@ -719,8 +738,16 @@ class TestConnection(BaseDBApiTestSuit):
     def test_errors(self, connection: dbapi.Connection) -> None:
         self._test_errors(connection)
 
-    def test_bulk_upsert(self, connection: dbapi.Connection) -> None:
-        self._test_bulk_upsert(connection)
+    def test_native_parameters_require_dict(
+        self, connection: dbapi.Connection
+    ) -> None:
+        self._test_native_parameters_require_dict(connection)
+
+    @pytest.mark.parametrize("rows_type", [list, tuple])
+    def test_bulk_upsert(
+        self, connection: dbapi.Connection, rows_type: type
+    ) -> None:
+        self._test_bulk_upsert(connection, rows_type)
 
     def test_errors_with_interactive_tx(
         self, connection: dbapi.Connection
@@ -871,10 +898,19 @@ class TestAsyncConnection(BaseDBApiTestSuit):
         await greenlet_spawn(self._test_errors, connection)
 
     @pytest.mark.asyncio
-    async def test_bulk_upsert(
+    async def test_native_parameters_require_dict(
         self, connection: dbapi.AsyncConnection
     ) -> None:
-        await greenlet_spawn(self._test_bulk_upsert, connection)
+        await greenlet_spawn(
+            self._test_native_parameters_require_dict, connection
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("rows_type", [list, tuple])
+    async def test_bulk_upsert(
+        self, connection: dbapi.AsyncConnection, rows_type: type
+    ) -> None:
+        await greenlet_spawn(self._test_bulk_upsert, connection, rows_type)
 
     @pytest.mark.asyncio
     async def test_errors_with_interactive_tx(

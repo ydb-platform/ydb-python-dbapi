@@ -133,9 +133,10 @@ def maybe_get_current_trace_id() -> str | None:
 def _credentials_from_dict(credentials: dict) -> ydb.Credentials:
     username = credentials.get("username")
     if username:
-        return ydb.StaticCredentials.from_user_password(
-            username, credentials.get("password")
-        )
+        password = credentials.get("password")
+        if password is None:
+            password = ""
+        return ydb.StaticCredentials.from_user_password(username, password)
 
     token = credentials.get("token")
     if token:

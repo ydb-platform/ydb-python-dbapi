@@ -1,9 +1,27 @@
 from __future__ import annotations
 
 import pytest
+import ydb
 import ydb_dbapi as dbapi
 from ydb_dbapi.errors import ProgrammingError
+from ydb_dbapi.utils import prepare_credentials
 from ydb_dbapi.utils import prepare_driver_config_kwargs
+
+
+@pytest.mark.parametrize(
+    ("credentials", "password"),
+    [
+        ({"username": "root"}, ""),
+        ({"username": "root", "password": None}, ""),
+        ({"username": "root", "password": ""}, ""),
+        ({"username": "root", "password": "secret"}, "secret"),
+    ],
+)
+def test_static_credentials_password(credentials: dict, password: str):
+    result = prepare_credentials(credentials)
+    assert isinstance(result, ydb.StaticCredentials)
+    assert result.user == "root"
+    assert result.password == password
 
 
 class TestPrepareDriverConfigKwargs:
