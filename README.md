@@ -19,11 +19,11 @@ import ydb_dbapi
 
 connection = ydb_dbapi.connect(
     host="localhost", port="2136", database="/local"
-) # sync connection
+)  # sync connection
 
 async_connection = await ydb_dbapi.async_connect(
     host="localhost", port="2136", database="/local"
-) # async connection
+)  # async connection
 ```
 
 Usage of connection:
@@ -48,6 +48,40 @@ async with async_connection.cursor() as cursor:
     rows = await cursor.fetchall()
 ```
 
+## Stream cursors (server-side cursor)
+
+By default results are fetched and buffered by the driver as soon as
+`execute()` is called. For large result sets pass `stream_results=True`
+to `cursor()`: the driver then streams result sets lazily, fetching the
+next chunk only when `fetch*()` needs it.
+
+```python
+with connection.cursor(stream_results=True) as cursor:
+    cursor.execute("SELECT id, val FROM table")
+
+    while True:
+        row = cursor.fetchone()
+        if row is None:
+            break
+        print(row)
+```
+
+```python
+async with async_connection.cursor(stream_results=True) as cursor:
+    await cursor.execute("SELECT id, val FROM table")
+
+    rows = await cursor.fetchall()
+```
+
+Notes:
+- `rowcount` is `-1` while the stream is still being consumed and is
+  reported only after all remaining rows have been fetched or the cursor is
+  closed.
+- In an interactive transaction only one stream cursor may be active at a
+  time: `commit()`, `rollback()` and executing another query while a stream
+  cursor is still streaming raise `ProgrammingError`. Fetch all rows or
+  close the cursor first.
+
 ## Query parameters
 
 ### Standard mode (`pyformat=True`)
@@ -63,7 +97,9 @@ and infer YDB types from Python values automatically.
 
 ```python
 connection = ydb_dbapi.connect(
-    host="localhost", port="2136", database="/local",
+    host="localhost",
+    port="2136",
+    database="/local",
     pyformat=True,
 )
 
@@ -122,7 +158,9 @@ with connection.cursor() as cursor:
         "INSERT INTO events (id, payload) VALUES (%(id)s, %(payload)s)",
         {
             "id": ydb.TypedValue(99, ydb.PrimitiveType.Int32),
-            "payload": ydb.TypedValue('{"key": "value"}', ydb.PrimitiveType.Json),
+            "payload": ydb.TypedValue(
+                '{"key": "value"}', ydb.PrimitiveType.Json
+            ),
         },
     )
 ```
@@ -143,7 +181,9 @@ in the query and supply a `dict` with `$`-prefixed keys:
 
 ```python
 connection = ydb_dbapi.connect(
-    host="localhost", port="2136", database="/local",
+    host="localhost",
+    port="2136",
+    database="/local",
 )
 
 with connection.cursor() as cursor:

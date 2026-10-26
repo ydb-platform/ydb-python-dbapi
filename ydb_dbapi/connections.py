@@ -15,11 +15,14 @@ from ydb.retries import retry_operation_async
 from ydb.retries import retry_operation_sync
 
 from .cursors import AsyncCursor
+from .cursors import AsyncStreamCursor
 from .cursors import Cursor
+from .cursors import StreamCursor
 from .errors import InterfaceError
 from .errors import InternalError
 from .errors import NotSupportedError
 from .errors import ProgrammingError
+from .utils import CursorStatus
 from .utils import handle_ydb_errors
 from .utils import maybe_get_current_trace_id
 from .utils import prepare_credentials
@@ -228,6 +231,7 @@ class Connection(BaseConnection):
     _driver_cls = ydb.Driver
     _pool_cls = ydb.QuerySessionPool
     _cursor_cls = Cursor
+    _stream_cursor_cls = StreamCursor
 
     def __init__(
         self,
@@ -258,10 +262,13 @@ class Connection(BaseConnection):
             pyformat=pyformat,
             **kwargs,
         )
-        self._current_cursor: Cursor | None = None
+        self._current_cursor: Cursor | StreamCursor | None = None
 
-    def cursor(self) -> Cursor:
-        return self._cursor_cls(
+    def cursor(self, stream_results: bool = False) -> Cursor | StreamCursor:
+        cursor_cls = (
+            self._stream_cursor_cls if stream_results else self._cursor_cls
+        )
+        return cursor_cls(
             connection=self,
             session_pool=self._session_pool,
             tx_mode=self._tx_mode,
@@ -291,8 +298,15 @@ class Connection(BaseConnection):
             self._session = self._session_pool.acquire()
             self._tx_context = self._session.transaction(self._tx_mode)
 
-    @handle_ydb_errors
     def commit(self) -> None:
+        self._raise_if_current_cursor_running()
+        try:
+            self._commit()
+        finally:
+            self._clear_current_cursor()
+
+    @handle_ydb_errors
+    def _commit(self) -> None:
         if self._tx_context:
             settings = self._get_request_settings()
             self._tx_context.commit(settings=settings)
@@ -301,8 +315,15 @@ class Connection(BaseConnection):
             self._session_pool.release(self._session)
             self._session = None
 
-    @handle_ydb_errors
     def rollback(self) -> None:
+        self._raise_if_current_cursor_running()
+        try:
+            self._rollback()
+        finally:
+            self._clear_current_cursor()
+
+    @handle_ydb_errors
+    def _rollback(self) -> None:
         if self._tx_context:
             settings = self._get_request_settings()
             self._tx_context.rollback(settings=settings)
@@ -313,6 +334,8 @@ class Connection(BaseConnection):
 
     @handle_ydb_errors
     def close(self) -> None:
+        if self._current_cursor is not None:
+            self._current_cursor.close()
         try:
             self.rollback()
         finally:
@@ -418,17 +441,38 @@ class Connection(BaseConnection):
         )
 
     def _invalidate_session(self) -> None:
+        self._clear_current_cursor()
         if self._tx_context:
             self._tx_context = None
         if self._session:
             self._session_pool.release(self._session)
             self._session = None
 
+    def _set_current_cursor(self, cursor: Cursor | StreamCursor) -> None:
+        self._current_cursor = cursor
+
+    def _clear_current_cursor(self, cursor: Cursor | None = None) -> None:
+        if cursor is None or self._current_cursor is cursor:
+            self._current_cursor = None
+
+    def _raise_if_current_cursor_running(
+        self, cursor: Cursor | None = None
+    ) -> None:
+        if self._current_cursor is None or self._current_cursor is cursor:
+            return
+        if self._current_cursor._state != CursorStatus.running:
+            return
+        raise ProgrammingError(
+            "Could not perform operation: a server-side cursor is still "
+            "streaming results for the current transaction session."
+        )
+
 
 class AsyncConnection(BaseConnection):
     _driver_cls = ydb.aio.Driver
     _pool_cls = ydb.aio.QuerySessionPool
     _cursor_cls = AsyncCursor
+    _stream_cursor_cls = AsyncStreamCursor
 
     def __init__(
         self,
@@ -459,10 +503,15 @@ class AsyncConnection(BaseConnection):
             pyformat=pyformat,
             **kwargs,
         )
-        self._current_cursor: AsyncCursor | None = None
+        self._current_cursor: AsyncStreamCursor | None = None
 
-    def cursor(self) -> AsyncCursor:
-        return self._cursor_cls(
+    def cursor(
+        self, stream_results: bool = False
+    ) -> AsyncCursor | AsyncStreamCursor:
+        cursor_cls = (
+            self._stream_cursor_cls if stream_results else self._cursor_cls
+        )
+        return cursor_cls(
             connection=self,
             session_pool=self._session_pool,
             tx_mode=self._tx_mode,
@@ -492,8 +541,15 @@ class AsyncConnection(BaseConnection):
             self._session = await self._session_pool.acquire()
             self._tx_context = self._session.transaction(self._tx_mode)
 
-    @handle_ydb_errors
     async def commit(self) -> None:
+        self._raise_if_current_cursor_running()
+        try:
+            await self._commit()
+        finally:
+            self._clear_current_cursor()
+
+    @handle_ydb_errors
+    async def _commit(self) -> None:
         if self._tx_context:
             settings = self._get_request_settings()
             await self._tx_context.commit(settings=settings)
@@ -502,8 +558,15 @@ class AsyncConnection(BaseConnection):
             await self._session_pool.release(self._session)
             self._session = None
 
-    @handle_ydb_errors
     async def rollback(self) -> None:
+        self._raise_if_current_cursor_running()
+        try:
+            await self._rollback()
+        finally:
+            self._clear_current_cursor()
+
+    @handle_ydb_errors
+    async def _rollback(self) -> None:
         if self._tx_context:
             settings = self._get_request_settings()
             await self._tx_context.rollback(settings=settings)
@@ -514,6 +577,8 @@ class AsyncConnection(BaseConnection):
 
     @handle_ydb_errors
     async def close(self) -> None:
+        if self._current_cursor is not None:
+            await self._current_cursor.close()
         try:
             await self.rollback()
         finally:
@@ -623,11 +688,33 @@ class AsyncConnection(BaseConnection):
         )
 
     async def _invalidate_session(self) -> None:
+        self._clear_current_cursor()
         if self._tx_context:
             self._tx_context = None
         if self._session:
             await self._session_pool.release(self._session)
             self._session = None
+
+    def _set_current_cursor(self, cursor: AsyncStreamCursor) -> None:
+        self._current_cursor = cursor
+
+    def _clear_current_cursor(
+        self, cursor: AsyncStreamCursor | None = None
+    ) -> None:
+        if cursor is None or self._current_cursor is cursor:
+            self._current_cursor = None
+
+    def _raise_if_current_cursor_running(
+        self, cursor: AsyncStreamCursor | None = None
+    ) -> None:
+        if self._current_cursor is None or self._current_cursor is cursor:
+            return
+        if self._current_cursor._state != CursorStatus.running:
+            return
+        raise ProgrammingError(
+            "Could not perform operation: a server-side cursor is still "
+            "streaming results for the current transaction session."
+        )
 
 
 def connect(

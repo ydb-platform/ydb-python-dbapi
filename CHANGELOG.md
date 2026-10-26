@@ -1,3 +1,8 @@
+## 0.1.24 ##
+* Add stream cursors (server-side cursor): connection.cursor(stream_results=True)
+* Guard transactional operations while a stream cursor is streaming
+* Sync and async stream cursors with lazy result-set fetching
+
 ## 0.1.23 ##
 * Read tx context from connection on cursor execute
 * Release session in close() even if rollback fails

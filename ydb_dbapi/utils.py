@@ -409,14 +409,14 @@ def _validate_named_parameters(
 ) -> dict:
     if not isinstance(parameters, dict):
         raise ProgrammingError(
-            "Named placeholders (%(name)s) require parameters "
-            "to be a dict."
+            "Named placeholders (%(name)s) require parameters to be a dict."
         )
 
     expected_keys = set(named_placeholders)
     actual_keys = set(parameters)
     invalid_prefixed_keys = [
-        name for name in actual_keys
+        name
+        for name in actual_keys
         if isinstance(name, str) and name.startswith("$")
     ]
     if invalid_prefixed_keys:

@@ -65,7 +65,6 @@ class BaseDBApiTestSuit:
             maybe_await(connection.begin())
             maybe_await(connection.rollback())
 
-
     def _test_close_releases_session_after_rollback_error(
         self,
         connection: dbapi.Connection,
@@ -174,6 +173,101 @@ class BaseDBApiTestSuit:
             connection.cursor().execute_scheme("DROP TABLE test_tx_context")
         )
 
+    def _test_stream_cursor_fetch(self, connection: dbapi.Connection) -> None:
+        cur = connection.cursor()
+        maybe_await(cur.execute_scheme("DROP TABLE IF EXISTS stream_table"))
+        maybe_await(
+            cur.execute_scheme(
+                """
+                CREATE TABLE stream_table (
+                id Int64 NOT NULL,
+                val Int64,
+                PRIMARY KEY(id)
+                )
+                """
+            )
+        )
+        maybe_await(
+            cur.execute(
+                "UPSERT INTO stream_table (id, val) "
+                "VALUES (0,0),(1,1),(2,2),(3,3)"
+            )
+        )
+        maybe_await(cur.close())
+
+        stream = connection.cursor(stream_results=True)
+        maybe_await(stream.execute("SELECT id FROM stream_table ORDER BY id"))
+
+        assert stream.rowcount == -1
+        assert maybe_await(stream.fetchmany(size=3)) == [(0,), (1,), (2,)]
+        assert stream.rowcount == -1
+        assert maybe_await(stream.fetchall()) == [(3,)]
+        assert stream.rowcount == 4
+
+        maybe_await(stream.close())
+        maybe_await(
+            connection.cursor().execute_scheme("DROP TABLE stream_table")
+        )
+
+    def _test_stream_cursor_interactive_transaction_guard(
+        self, connection: dbapi.Connection
+    ) -> None:
+        cur = connection.cursor()
+        maybe_await(
+            cur.execute_scheme("DROP TABLE IF EXISTS stream_guard_table")
+        )
+        maybe_await(
+            cur.execute_scheme(
+                """
+                CREATE TABLE stream_guard_table (
+                id Int64 NOT NULL,
+                val Int64,
+                PRIMARY KEY(id)
+                )
+                """
+            )
+        )
+        maybe_await(
+            cur.execute(
+                "UPSERT INTO stream_guard_table (id, val) "
+                "VALUES (0,0),(1,1),(2,2),(3,3)"
+            )
+        )
+        maybe_await(cur.close())
+
+        connection.set_isolation_level(dbapi.IsolationLevel.SERIALIZABLE)
+        maybe_await(connection.begin())
+
+        stream = connection.cursor(stream_results=True)
+        maybe_await(
+            stream.execute("SELECT id FROM stream_guard_table ORDER BY id")
+        )
+        assert connection._current_cursor is stream
+
+        other = connection.cursor()
+        with pytest.raises(dbapi.ProgrammingError):
+            maybe_await(other.execute("SELECT id FROM stream_guard_table"))
+
+        with pytest.raises(dbapi.ProgrammingError):
+            maybe_await(connection.commit())
+
+        rows = []
+        while True:
+            row = maybe_await(stream.fetchone())
+            if row is None:
+                break
+            rows.append(row)
+        assert len(rows) == 4
+        assert connection._current_cursor is None
+
+        maybe_await(connection.rollback())
+
+        maybe_await(other.close())
+        maybe_await(stream.close())
+        maybe_await(
+            connection.cursor().execute_scheme("DROP TABLE stream_guard_table")
+        )
+
     def _test_connection(self, connection: dbapi.Connection) -> None:
         maybe_await(connection.commit())
         maybe_await(connection.rollback())
@@ -208,9 +302,12 @@ class BaseDBApiTestSuit:
         with suppress(dbapi.DatabaseError):
             maybe_await(cur.execute_scheme("DROP TABLE test"))
 
-        maybe_await(cur.execute_scheme(
-            "CREATE TABLE test(id Int64 NOT NULL, text Utf8, PRIMARY KEY (id))"
-        ))
+        maybe_await(
+            cur.execute_scheme(
+                "CREATE TABLE test("
+                "id Int64 NOT NULL, text Utf8, PRIMARY KEY (id))"
+            )
+        )
 
         maybe_await(
             cur.execute(
@@ -589,9 +686,7 @@ class TestConnection(BaseDBApiTestSuit):
         isolation_level: str,
         connection: dbapi.Connection,
     ) -> None:
-        self._test_commit_rollback_after_begin(
-            connection, isolation_level
-        )
+        self._test_commit_rollback_after_begin(connection, isolation_level)
 
     def test_close_releases_session_after_rollback_error(
         self, connection: dbapi.Connection
@@ -632,15 +727,19 @@ class TestConnection(BaseDBApiTestSuit):
     ) -> None:
         self._test_error_with_interactive_tx(connection)
 
-    def test_get_view_names(
-        self, connection: dbapi.Connection
-    ) -> None:
+    def test_get_view_names(self, connection: dbapi.Connection) -> None:
         self._test_get_view_names(connection)
 
-    def test_get_table_names(
+    def test_get_table_names(self, connection: dbapi.Connection) -> None:
+        self._test_get_table_names(connection)
+
+    def test_stream_cursor_fetch(self, connection: dbapi.Connection) -> None:
+        self._test_stream_cursor_fetch(connection)
+
+    def test_stream_cursor_interactive_transaction_guard(
         self, connection: dbapi.Connection
     ) -> None:
-        self._test_get_table_names(connection)
+        self._test_stream_cursor_interactive_transaction_guard(connection)
 
 
 class TestAsyncConnection(BaseDBApiTestSuit):
@@ -717,9 +816,7 @@ class TestAsyncConnection(BaseDBApiTestSuit):
         connection: dbapi.AsyncConnection,
     ) -> None:
         await greenlet_spawn(
-            self._test_commit_rollback_after_begin,
-            connection,
-            isolation_level
+            self._test_commit_rollback_after_begin, connection, isolation_level
         )
 
     @pytest.mark.asyncio
@@ -796,3 +893,18 @@ class TestAsyncConnection(BaseDBApiTestSuit):
         self, connection: dbapi.AsyncConnection
     ) -> None:
         await greenlet_spawn(self._test_get_table_names, connection)
+
+    @pytest.mark.asyncio
+    async def test_stream_cursor_fetch(
+        self, connection: dbapi.AsyncConnection
+    ) -> None:
+        await greenlet_spawn(self._test_stream_cursor_fetch, connection)
+
+    @pytest.mark.asyncio
+    async def test_stream_cursor_interactive_transaction_guard(
+        self, connection: dbapi.AsyncConnection
+    ) -> None:
+        await greenlet_spawn(
+            self._test_stream_cursor_interactive_transaction_guard,
+            connection,
+        )
