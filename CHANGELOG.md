@@ -1,3 +1,4 @@
+## 0.1.24 ##
 * Fix DBAPI typing with newer YDB SDK releases
 
 ## 0.1.23 ##
