@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from collections.abc import Generator
 from inspect import iscoroutine
+from typing import Any
+from unittest import mock
 
 import pytest
 import ydb
@@ -339,31 +341,32 @@ class TestAsyncCursor(BaseCursorTestSuit):
         await greenlet_spawn(self._test_cursor_state_after_error, async_cursor)
 
 
-class FakeResultSet:
-    def __init__(self, rows: list[tuple], columns: list[object]) -> None:
-        self.rows = rows
-        self.columns = columns
+# Mock-based stream cursor tests
 
 
-def make_stream_result_sets(count: int = 1) -> list[FakeResultSet]:
-    return [
-        FakeResultSet(
-            rows=[(row_id, row_id) for row_id in range(RESULT_SET_LENGTH)],
-            columns=[],
-        )
-        for _ in range(count)
-    ]
+RESULT_SET_LENGTH = 4
+RESULT_SET_COUNT = 3
 
 
-class FakeSyncResponseContextIterator:
-    def __init__(self, result_sets: list[FakeResultSet]) -> None:
+def make_result_sets(count: int = 1) -> list[mock.MagicMock]:
+    result_sets = []
+    for _ in range(count):
+        rs = mock.MagicMock()
+        rs.rows = [(row_id, row_id) for row_id in range(RESULT_SET_LENGTH)]
+        rs.columns = []
+        result_sets.append(rs)
+    return result_sets
+
+
+class _SyncStream:
+    def __init__(self, result_sets: list) -> None:
         self._result_sets = iter(result_sets)
         self.cancelled = False
 
-    def __iter__(self) -> FakeSyncResponseContextIterator:
+    def __iter__(self) -> _SyncStream:
         return self
 
-    def __next__(self) -> FakeResultSet:
+    def __next__(self) -> Any:
         return next(self._result_sets)
 
     def cancel(self) -> None:
@@ -372,24 +375,24 @@ class FakeSyncResponseContextIterator:
     def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+    def __exit__(self, *args: object) -> None:
         for _ in self:
             pass
 
 
-class FakeAsyncResponseContextIterator:
-    def __init__(self, result_sets: list[FakeResultSet]) -> None:
+class _AsyncStream:
+    def __init__(self, result_sets: list) -> None:
         self._result_sets = iter(result_sets)
         self.cancelled = False
 
-    def __aiter__(self) -> FakeAsyncResponseContextIterator:
+    def __aiter__(self) -> _AsyncStream:
         return self
 
-    async def __anext__(self) -> FakeResultSet:
+    async def __anext__(self) -> Any:
         try:
             return next(self._result_sets)
-        except StopIteration as e:
-            raise StopAsyncIteration from e
+        except StopIteration as exc:
+            raise StopAsyncIteration from exc
 
     def cancel(self) -> None:
         self.cancelled = True
@@ -397,145 +400,105 @@ class FakeAsyncResponseContextIterator:
     async def __aenter__(self) -> Self:
         return self
 
-    async def __aexit__(
-        self, exc_type: object, exc: object, tb: object
-    ) -> None:
+    async def __aexit__(self, *args: object) -> None:
         async for _ in self:
             pass
 
 
-class FakeFailingSyncResponseContextIterator(FakeSyncResponseContextIterator):
-    def __next__(self) -> FakeResultSet:
+class _FailingSyncStream(_SyncStream):
+    def __next__(self) -> Any:
         raise ydb.issues.GenericError("boom")
 
 
-class FakeFailingAsyncResponseContextIterator(
-    FakeAsyncResponseContextIterator
-):
-    async def __anext__(self) -> FakeResultSet:
+class _FailingAsyncStream(_AsyncStream):
+    async def __anext__(self) -> Any:
         raise ydb.issues.GenericError("boom")
 
 
-class FakeSyncStreamSession:
-    def __init__(self, result_sets: list[FakeResultSet]) -> None:
-        self._result_sets = result_sets
-        self.deleted = False
+def _make_sync_cursor(result_sets: list) -> StreamCursor:
+    session = mock.MagicMock()
+    session.deleted = False
+    stream = _SyncStream(result_sets)
+    session.transaction.return_value.execute.return_value = stream
 
-    def transaction(
-        self, tx_mode: ydb.BaseQueryTxMode
-    ) -> FakeSyncStreamSession:
-        return self
+    def _delete() -> None:
+        session.deleted = True
 
-    def execute(self, **kwargs: object) -> FakeSyncResponseContextIterator:
-        return FakeSyncResponseContextIterator(self._result_sets)
+    session.delete.side_effect = _delete
 
-    def delete(self) -> None:
-        self.deleted = True
+    pool = mock.MagicMock()
+    pool.acquire.return_value = session
+    released: list = []
+    pool.release.side_effect = lambda s: released.append(s)
+    pool.released_sessions = released
+    pool.session = session
 
+    connection = mock.MagicMock()
+    connection._tx_context = None
+    connection._set_current_cursor = mock.MagicMock()
+    connection._clear_current_cursor = mock.MagicMock()
+    connection._invalidate_session = mock.MagicMock()
 
-class FakeAsyncStreamSession:
-    def __init__(self, result_sets: list[FakeResultSet]) -> None:
-        self._result_sets = result_sets
-        self.deleted = False
-
-    def transaction(
-        self, tx_mode: ydb.BaseQueryTxMode
-    ) -> FakeAsyncStreamSession:
-        return self
-
-    async def execute(
-        self, **kwargs: object
-    ) -> FakeAsyncResponseContextIterator:
-        return FakeAsyncResponseContextIterator(self._result_sets)
-
-    async def delete(self) -> None:
-        self.deleted = True
-
-
-class FakeFailingSyncStreamSession(FakeSyncStreamSession):
-    def execute(
-        self, **kwargs: object
-    ) -> FakeFailingSyncResponseContextIterator:
-        return FakeFailingSyncResponseContextIterator(self._result_sets)
+    cursor = StreamCursor(
+        connection,
+        pool,
+        ydb.QuerySerializableReadWrite(),
+        request_settings=ydb.BaseRequestSettings(),
+        retry_settings=ydb.RetrySettings(),
+    )
+    cursor._test_pool = pool
+    cursor._test_session = session
+    return cursor
 
 
-class FakeFailingAsyncStreamSession(FakeAsyncStreamSession):
-    async def execute(
-        self, **kwargs: object
-    ) -> FakeFailingAsyncResponseContextIterator:
-        return FakeFailingAsyncResponseContextIterator(self._result_sets)
+def _make_async_cursor(result_sets: list) -> AsyncStreamCursor:
+    session = mock.AsyncMock()
+    session.deleted = False
+    stream = _AsyncStream(result_sets)
+    tx = mock.MagicMock()
+    tx.execute = mock.AsyncMock(return_value=stream)
+    session.transaction = mock.MagicMock(return_value=tx)
 
+    async def _delete() -> None:
+        session.deleted = True
 
-class FakeSyncStreamSessionPool:
-    def __init__(self, result_sets: list[FakeResultSet]) -> None:
-        self.session = FakeSyncStreamSession(result_sets)
-        self.released_sessions: list[FakeSyncStreamSession] = []
+    session.delete.side_effect = _delete
 
-    def acquire(self, timeout: float | None = None) -> FakeSyncStreamSession:
-        return self.session
+    pool = mock.MagicMock()
+    pool.acquire = mock.AsyncMock(return_value=session)
+    released: list = []
 
-    def release(self, session: FakeSyncStreamSession) -> None:
-        self.released_sessions.append(session)
+    async def _release(s: Any) -> None:
+        released.append(s)
 
+    pool.release = mock.AsyncMock(side_effect=_release)
+    pool.released_sessions = released
+    pool.session = session
 
-class FakeAsyncStreamSessionPool:
-    def __init__(self, result_sets: list[FakeResultSet]) -> None:
-        self.session = FakeAsyncStreamSession(result_sets)
-        self.released_sessions: list[FakeAsyncStreamSession] = []
+    connection = mock.MagicMock()
+    connection._tx_context = None
+    connection._set_current_cursor = mock.MagicMock()
+    connection._clear_current_cursor = mock.MagicMock()
+    connection._invalidate_session = mock.AsyncMock()
 
-    async def acquire(
-        self, timeout: float | None = None
-    ) -> FakeAsyncStreamSession:
-        return self.session
-
-    async def release(self, session: FakeAsyncStreamSession) -> None:
-        self.released_sessions.append(session)
-
-
-class FakeSyncStreamConnection:
-    _tx_context = None
-
-    def __init__(self) -> None:
-        self.current_cursor: StreamCursor | None = None
-
-    def _invalidate_session(self) -> None: ...
-
-    def _set_current_cursor(self, cursor: StreamCursor) -> None:
-        self.current_cursor = cursor
-
-    def _clear_current_cursor(self, cursor: Cursor | None = None) -> None:
-        if cursor is None or self.current_cursor is cursor:
-            self.current_cursor = None
-
-
-class FakeAsyncStreamConnection:
-    _tx_context = None
-
-    def __init__(self) -> None:
-        self.current_cursor: AsyncStreamCursor | None = None
-
-    async def _invalidate_session(self) -> None: ...
-
-    def _set_current_cursor(self, cursor: AsyncStreamCursor) -> None:
-        self.current_cursor = cursor
-
-    def _clear_current_cursor(self, cursor: AsyncCursor | None = None) -> None:
-        if cursor is None or self.current_cursor is cursor:
-            self.current_cursor = None
+    cursor = AsyncStreamCursor(
+        connection,
+        pool,
+        ydb.QuerySerializableReadWrite(),
+        request_settings=ydb.BaseRequestSettings(),
+        retry_settings=ydb.RetrySettings(),
+    )
+    cursor._test_pool = pool
+    cursor._test_session = session
+    return cursor
 
 
 class TestStreamCursor:
     def _make_cursor(self, result_sets: list) -> StreamCursor:
-        return StreamCursor(
-            FakeSyncStreamConnection(),
-            FakeSyncStreamSessionPool(result_sets),
-            ydb.QuerySerializableReadWrite(),
-            request_settings=ydb.BaseRequestSettings(),
-            retry_settings=ydb.RetrySettings(),
-        )
+        return _make_sync_cursor(result_sets)
 
     def test_stream_cursor_fetch_one(self) -> None:
-        cursor = self._make_cursor(make_stream_result_sets())
+        cursor = self._make_cursor(make_result_sets())
         try:
             cursor.execute("SELECT id, val FROM table")
 
@@ -552,7 +515,7 @@ class TestStreamCursor:
             cursor.close()
 
     def test_stream_cursor_fetch_many(self) -> None:
-        cursor = self._make_cursor(make_stream_result_sets(RESULT_SET_COUNT))
+        cursor = self._make_cursor(make_result_sets(RESULT_SET_COUNT))
         try:
             cursor.execute(
                 """
@@ -576,7 +539,7 @@ class TestStreamCursor:
             cursor.close()
 
     def test_stream_cursor_fetch_all(self) -> None:
-        cursor = self._make_cursor(make_stream_result_sets())
+        cursor = self._make_cursor(make_result_sets())
         try:
             cursor.execute("SELECT id, val FROM table")
 
@@ -588,7 +551,7 @@ class TestStreamCursor:
             cursor.close()
 
     def test_stream_cursor_releases_session_after_drain(self) -> None:
-        cursor = self._make_cursor(make_stream_result_sets())
+        cursor = self._make_cursor(make_result_sets())
         pool = cursor._session_pool
         try:
             cursor.execute("SELECT id, val FROM table")
@@ -600,7 +563,7 @@ class TestStreamCursor:
             cursor.close()
 
     def test_stream_cursor_discards_session_on_close(self) -> None:
-        cursor = self._make_cursor(make_stream_result_sets())
+        cursor = self._make_cursor(make_result_sets())
         pool = cursor._session_pool
         cursor.execute("SELECT id, val FROM table")
         cursor.close()
@@ -609,7 +572,7 @@ class TestStreamCursor:
         assert pool.released_sessions == [pool.session]
 
     def test_stream_cursor_cancels_stream_on_close(self) -> None:
-        cursor = self._make_cursor(make_stream_result_sets())
+        cursor = self._make_cursor(make_result_sets())
         cursor.execute("SELECT id, val FROM table")
         stream = cursor._stream
         cursor.close()
@@ -618,9 +581,21 @@ class TestStreamCursor:
         assert stream.cancelled is True
 
     def test_stream_cursor_invalidate_owner_session_on_error(self) -> None:
-        cursor = self._make_cursor(make_stream_result_sets())
+        cursor = self._make_cursor(make_result_sets())
         pool = cursor._session_pool
-        pool.session = FakeFailingSyncStreamSession(make_stream_result_sets())
+        failing_session = mock.MagicMock()
+        failing_session.deleted = False
+        failing_stream = _FailingSyncStream(make_result_sets())
+        failing_session.transaction.return_value.execute.return_value = (
+            failing_stream
+        )
+
+        def _delete() -> None:
+            failing_session.deleted = True
+
+        failing_session.delete.side_effect = _delete
+        pool.session = failing_session
+        pool.acquire.return_value = failing_session
 
         with pytest.raises(ydb_dbapi.Error):
             cursor.execute("SELECT id, val FROM table")
@@ -632,17 +607,11 @@ class TestStreamCursor:
 
 class TestAsyncStreamCursor:
     def _make_cursor(self, result_sets: list) -> AsyncStreamCursor:
-        return AsyncStreamCursor(
-            FakeAsyncStreamConnection(),
-            FakeAsyncStreamSessionPool(result_sets),
-            ydb.QuerySerializableReadWrite(),
-            request_settings=ydb.BaseRequestSettings(),
-            retry_settings=ydb.RetrySettings(),
-        )
+        return _make_async_cursor(result_sets)
 
     @pytest.mark.asyncio
     async def test_stream_cursor_fetch_one(self) -> None:
-        cursor = self._make_cursor(make_stream_result_sets())
+        cursor = self._make_cursor(make_result_sets())
         try:
             await cursor.execute("SELECT id, val FROM table")
 
@@ -660,7 +629,7 @@ class TestAsyncStreamCursor:
 
     @pytest.mark.asyncio
     async def test_stream_cursor_fetch_many(self) -> None:
-        cursor = self._make_cursor(make_stream_result_sets(RESULT_SET_COUNT))
+        cursor = self._make_cursor(make_result_sets(RESULT_SET_COUNT))
         try:
             await cursor.execute(
                 """
@@ -685,7 +654,7 @@ class TestAsyncStreamCursor:
 
     @pytest.mark.asyncio
     async def test_stream_cursor_fetch_all(self) -> None:
-        cursor = self._make_cursor(make_stream_result_sets())
+        cursor = self._make_cursor(make_result_sets())
         try:
             await cursor.execute("SELECT id, val FROM table")
 
@@ -698,7 +667,7 @@ class TestAsyncStreamCursor:
 
     @pytest.mark.asyncio
     async def test_stream_cursor_discards_session_on_close(self) -> None:
-        cursor = self._make_cursor(make_stream_result_sets())
+        cursor = self._make_cursor(make_result_sets())
         pool = cursor._session_pool
         await cursor.execute("SELECT id, val FROM table")
         await cursor.close()
@@ -710,9 +679,21 @@ class TestAsyncStreamCursor:
     async def test_stream_cursor_invalidate_owner_session_on_error(
         self,
     ) -> None:
-        cursor = self._make_cursor(make_stream_result_sets())
+        cursor = self._make_cursor(make_result_sets())
         pool = cursor._session_pool
-        pool.session = FakeFailingAsyncStreamSession(make_stream_result_sets())
+        failing_session = mock.AsyncMock()
+        failing_session.deleted = False
+        failing_stream = _FailingAsyncStream(make_result_sets())
+        tx = mock.MagicMock()
+        tx.execute = mock.AsyncMock(return_value=failing_stream)
+        failing_session.transaction = mock.MagicMock(return_value=tx)
+
+        async def _delete() -> None:
+            failing_session.deleted = True
+
+        failing_session.delete.side_effect = _delete
+        pool.session = failing_session
+        pool.acquire = mock.AsyncMock(return_value=failing_session)
 
         with pytest.raises(ydb_dbapi.Error):
             await cursor.execute("SELECT id, val FROM table")

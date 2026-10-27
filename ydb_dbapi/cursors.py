@@ -344,6 +344,8 @@ class Cursor(BufferedCursor):
     ) -> None:
         self._raise_if_closed()
         self._raise_if_running()
+        if self._tx_context is not None:
+            self._connection._raise_if_current_cursor_running()
 
         query = self._append_table_path_prefix(query)
         ydb_parameters = _as_ydb_parameters(parameters)
@@ -658,6 +660,7 @@ class StreamCursor(Cursor):
         if self._state == CursorStatus.running:
             if self._session_owner is not None and self._stream is not None:
                 self._stream.cancel()
+                self._finalize_rowcount()
                 self._stream = None
                 self._discard_owned_session()
             elif self._stream is not None:
@@ -801,6 +804,8 @@ class AsyncCursor(BufferedCursor):
     ) -> None:
         self._raise_if_closed()
         self._raise_if_running()
+        if self._tx_context is not None:
+            self._connection._raise_if_current_cursor_running()
 
         query = self._append_table_path_prefix(query)
         ydb_parameters = _as_ydb_parameters(parameters)
@@ -944,12 +949,19 @@ class AsyncStreamCursor(BufferedCursor):
     ) -> None:
         self._raise_if_closed()
         self._raise_if_running()
+        if self._tx_context is not None:
+            self._connection._raise_if_current_cursor_running()
 
         query = self._append_table_path_prefix(query)
+
+        if self._pyformat and parameters is not None:
+            query, parameters = convert_query_parameters(query, parameters)
+
+        ydb_parameters = _as_ydb_parameters(parameters)
         self._begin_query()
 
         result_list = await self._execute_generic_query(
-            query=query, parameters=parameters
+            query=query, parameters=ydb_parameters
         )
         self._fill_buffer(result_list)
         self._finish_query()
@@ -1183,6 +1195,7 @@ class AsyncStreamCursor(BufferedCursor):
         if self._state == CursorStatus.running:
             if self._session_owner is not None and self._stream is not None:
                 self._stream.cancel()
+                self._finalize_rowcount()
                 self._stream = None
                 await self._discard_owned_session()
             elif self._stream is not None:

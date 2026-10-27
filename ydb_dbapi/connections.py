@@ -308,6 +308,7 @@ class Connection(BaseConnection):
 
     @handle_ydb_errors
     def begin(self) -> None:
+        self._raise_if_current_cursor_running()
         self._tx_context = None
         if self.interactive_transaction:
             self._session = self._session_pool.acquire()
@@ -564,6 +565,7 @@ class AsyncConnection(BaseConnection):
 
     @handle_ydb_errors
     async def begin(self) -> None:
+        self._raise_if_current_cursor_running()
         self._tx_context = None
         if self.interactive_transaction:
             self._session = await self._session_pool.acquire()
