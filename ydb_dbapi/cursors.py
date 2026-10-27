@@ -13,6 +13,10 @@ from typing import Callable
 from typing import Union
 
 import ydb
+from ydb.aio.query.base import AsyncResponseContextIterator
+from ydb.query.base import SyncResponseContextIterator
+from ydb.retries import retry_operation_async
+from ydb.retries import retry_operation_sync
 
 from .errors import DatabaseError
 from .errors import InterfaceError
@@ -66,7 +70,7 @@ def invalidate_cursor_on_ydb_error(func: Callable) -> Callable:
                 return await func(self, *args, **kwargs)
             except ydb.Error:
                 self._state = CursorStatus.finished
-                await self._connection._invalidate_session()
+                await self._invalidate_active_session()
                 raise
 
         return awrapper
@@ -77,7 +81,7 @@ def invalidate_cursor_on_ydb_error(func: Callable) -> Callable:
             return func(self, *args, **kwargs)
         except ydb.Error:
             self._state = CursorStatus.finished
-            self._connection._invalidate_session()
+            self._invalidate_active_session()
             raise
 
     return wrapper
@@ -258,6 +262,9 @@ class Cursor(BufferedCursor):
 
         return settings
 
+    def _invalidate_active_session(self) -> None:
+        self._connection._invalidate_session()
+
     def _materialize(
         self, stream: Iterator[ydb.convert.ResultSet]
     ) -> list[ydb.convert.ResultSet]:
@@ -336,6 +343,9 @@ class Cursor(BufferedCursor):
         parameters: ParametersType | None = None,
     ) -> None:
         self._raise_if_closed()
+        self._raise_if_running()
+        if self._tx_context is not None:
+            self._connection._raise_if_current_cursor_running()
 
         query = self._append_table_path_prefix(query)
         ydb_parameters = _as_ydb_parameters(parameters)
@@ -354,6 +364,8 @@ class Cursor(BufferedCursor):
     ) -> None:
         self._raise_if_closed()
         self._raise_if_running()
+        if self._tx_context is not None:
+            self._connection._raise_if_current_cursor_running()
 
         query = self._append_table_path_prefix(query)
 
@@ -404,6 +416,267 @@ class Cursor(BufferedCursor):
         self.close()
 
 
+class StreamCursor(Cursor):
+    def __init__(
+        self,
+        connection: Connection,
+        session_pool: ydb.QuerySessionPool,
+        tx_mode: ydb.BaseQueryTxMode,
+        request_settings: ydb.BaseRequestSettings,
+        retry_settings: ydb.RetrySettings,
+        table_path_prefix: str = "",
+        pyformat: bool = False,
+    ) -> None:
+        super().__init__(
+            connection=connection,
+            session_pool=session_pool,
+            tx_mode=tx_mode,
+            request_settings=request_settings,
+            retry_settings=retry_settings,
+            table_path_prefix=table_path_prefix,
+            pyformat=pyformat,
+        )
+        self._stream: SyncResponseContextIterator | None = None
+        self._session_owner: ydb.QuerySession | None = None
+        self._rowcount_accumulator: int = 0
+
+    def _invalidate_active_session(self) -> None:
+        self._clear_current_cursor()
+        if self._session_owner is None:
+            self._connection._invalidate_session()
+            return
+
+        session = self._session_owner
+        self._session_owner = None
+        self._stream = None
+        try:
+            session.delete()
+        finally:
+            self._session_pool.release(session)
+
+    def _clear_current_cursor(self) -> None:
+        self._connection._clear_current_cursor(self)
+
+    def _register_current_cursor(self) -> None:
+        if self._tx_context is not None:
+            self._connection._set_current_cursor(self)
+
+    def _release_owned_session(self) -> None:
+        if self._session_owner is None:
+            return
+
+        session = self._session_owner
+        self._session_owner = None
+        self._session_pool.release(session)
+
+    def _discard_owned_session(self) -> None:
+        if self._session_owner is None:
+            return
+
+        session = self._session_owner
+        self._session_owner = None
+        try:
+            session.delete()
+        finally:
+            self._session_pool.release(session)
+
+    def _finish_stream(self) -> None:
+        self._stream = None
+        self._release_owned_session()
+        self._clear_current_cursor()
+        self._finish_query()
+
+    def _reset_result(self) -> None:
+        super()._reset_result()
+        self._rowcount_accumulator = 0
+
+    def _update_result_set(
+        self,
+        result_set: ydb.convert.ResultSet,
+        replace_current: bool = True,
+    ) -> None:
+        # A streaming cursor reports the total number of fetched rows only
+        # after the stream is exhausted, so here the count is accumulated
+        # and the final value is set in _finish_query().
+        self._update_description(result_set)
+        self._rowcount_accumulator += len(result_set.rows)
+
+        new_rows_iter = self._rows_iterable(result_set)
+
+        if self._rows is None or replace_current:
+            self._rows = new_rows_iter
+        else:
+            self._rows = itertools.chain(self._rows, new_rows_iter)
+
+    def _finalize_rowcount(self) -> None:
+        self._rows_count = self._rowcount_accumulator
+
+    def _finish_query(self) -> None:
+        self._finalize_rowcount()
+        super()._finish_query()
+
+    @handle_ydb_errors
+    @invalidate_cursor_on_ydb_error
+    def _load_next_result_set(self) -> bool:
+        if self._stream is None:
+            return False
+
+        try:
+            result_set = next(self._stream)
+        except StopIteration:
+            self._finish_stream()
+            return False
+
+        self._update_result_set(result_set, replace_current=False)
+        return True
+
+    def _prime_stream(self) -> None:
+        if (
+            not self._load_next_result_set()
+            and self._state == CursorStatus.running
+        ):
+            self._finish_stream()
+
+    @handle_ydb_errors
+    @invalidate_cursor_on_ydb_error
+    def _execute_session_query_stream(
+        self,
+        query: str,
+        parameters: dict | None = None,
+    ) -> SyncResponseContextIterator:
+        settings = self._get_request_settings()
+
+        def callee() -> SyncResponseContextIterator:
+            acquire_timeout = getattr(
+                self._retry_settings,
+                "max_session_acquire_timeout",
+                None,
+            )
+            session = self._session_pool.acquire(timeout=acquire_timeout)
+            try:
+                stream = session.transaction(self._tx_mode).execute(
+                    query=query,
+                    parameters=parameters,
+                    commit_tx=True,
+                    settings=settings,
+                )
+            except Exception:
+                self._session_pool.release(session)
+                raise
+
+            self._session_owner = session
+            return stream
+
+        return retry_operation_sync(
+            callee,
+            self._retry_settings,
+        )
+
+    @handle_ydb_errors
+    @invalidate_cursor_on_ydb_error
+    def _execute_transactional_query_stream(
+        self,
+        tx_context: ydb.QueryTxContext,
+        query: str,
+        parameters: dict | None = None,
+    ) -> SyncResponseContextIterator:
+        settings = self._get_request_settings()
+        return tx_context.execute(
+            query=query,
+            parameters=parameters,
+            commit_tx=False,
+            settings=settings,
+        )
+
+    def execute(
+        self,
+        query: str,
+        parameters: ParametersType | None = None,
+    ) -> None:
+        self._raise_if_closed()
+        self._raise_if_running()
+        if self._tx_context is not None:
+            self._connection._raise_if_current_cursor_running(self)
+
+        query = self._append_table_path_prefix(query)
+
+        if self._pyformat and parameters is not None:
+            query, parameters = convert_query_parameters(query, parameters)
+
+        ydb_parameters = _as_ydb_parameters(parameters)
+        self._begin_query()
+
+        if self._tx_context is not None:
+            self._stream = self._execute_transactional_query_stream(
+                tx_context=self._tx_context,
+                query=query,
+                parameters=ydb_parameters,
+            )
+            self._register_current_cursor()
+        else:
+            self._stream = self._execute_session_query_stream(
+                query=query,
+                parameters=ydb_parameters,
+            )
+
+        self._prime_stream()
+
+    def fetchone(self) -> tuple | None:
+        self._raise_if_closed()
+
+        while True:
+            row = self._fetchone_from_buffer()
+            if row is not None:
+                return row
+            if not self._load_next_result_set():
+                return None
+
+    def fetchmany(self, size: int | None = None) -> list:
+        self._raise_if_closed()
+        result: list[tuple] = []
+        target_size = size or self.arraysize
+
+        while len(result) < target_size:
+            row = self.fetchone()
+            if row is None:
+                break
+            result.append(row)
+
+        return result
+
+    def fetchall(self) -> list:
+        self._raise_if_closed()
+        result = list(self._fetchall_from_buffer())
+
+        while self._load_next_result_set():
+            result.extend(self._fetchall_from_buffer())
+
+        return result
+
+    def close(self) -> None:
+        if self._state == CursorStatus.closed:
+            return
+
+        if self._state == CursorStatus.running:
+            if self._session_owner is not None and self._stream is not None:
+                self._stream.cancel()
+                self._finalize_rowcount()
+                self._stream = None
+                self._discard_owned_session()
+            elif self._stream is not None:
+                with self._stream:
+                    pass
+                self._finish_stream()
+            else:
+                self._release_owned_session()
+                self._clear_current_cursor()
+
+        self._stream = None
+        self._session_owner = None
+        self._clear_current_cursor()
+        self._state = CursorStatus.closed
+
+
 class AsyncCursor(BufferedCursor):
     def __init__(
         self,
@@ -448,6 +721,9 @@ class AsyncCursor(BufferedCursor):
             settings = settings.with_trace_id(maybe_get_current_trace_id())
 
         return settings
+
+    async def _invalidate_active_session(self) -> None:
+        await self._connection._invalidate_session()
 
     async def _materialize(
         self, stream: AsyncIterator[ydb.convert.ResultSet]
@@ -527,6 +803,9 @@ class AsyncCursor(BufferedCursor):
         parameters: ParametersType | None = None,
     ) -> None:
         self._raise_if_closed()
+        self._raise_if_running()
+        if self._tx_context is not None:
+            self._connection._raise_if_current_cursor_running()
 
         query = self._append_table_path_prefix(query)
         ydb_parameters = _as_ydb_parameters(parameters)
@@ -545,6 +824,8 @@ class AsyncCursor(BufferedCursor):
     ) -> None:
         self._raise_if_closed()
         self._raise_if_running()
+        if self._tx_context is not None:
+            self._connection._raise_if_current_cursor_running()
 
         query = self._append_table_path_prefix(query)
 
@@ -593,3 +874,350 @@ class AsyncCursor(BufferedCursor):
         tb: object,
     ) -> None:
         self.close()
+
+
+class AsyncStreamCursor(BufferedCursor):
+    def __init__(
+        self,
+        connection: AsyncConnection,
+        session_pool: ydb.aio.QuerySessionPool,
+        tx_mode: ydb.BaseQueryTxMode,
+        request_settings: ydb.BaseRequestSettings,
+        retry_settings: ydb.RetrySettings,
+        table_path_prefix: str = "",
+        pyformat: bool = False,
+    ) -> None:
+        super().__init__()
+        self._connection = connection
+        self._session_pool = session_pool
+        self._tx_mode = tx_mode
+        self._request_settings = request_settings
+        self._retry_settings = retry_settings
+        self._table_path_prefix = table_path_prefix
+        self._pyformat = pyformat
+        self._stream: AsyncResponseContextIterator | None = None
+        self._session_owner: ydb.aio.QuerySession | None = None
+        self._rowcount_accumulator: int = 0
+
+    @property
+    def _tx_context(self) -> ydb.aio.QueryTxContext | None:
+        # Read the transaction from the connection on every access: a cursor
+        # must not pin the transaction that was open when it was created.
+        return self._connection._tx_context
+
+    def _get_request_settings(self) -> ydb.BaseRequestSettings:
+        settings = self._request_settings.make_copy()
+
+        if self._request_settings.trace_id is None:
+            settings = settings.with_trace_id(maybe_get_current_trace_id())
+
+        return settings
+
+    async def _materialize(
+        self, stream: AsyncIterator[ydb.convert.ResultSet]
+    ) -> list[ydb.convert.ResultSet]:
+        return [result_set async for result_set in stream]
+
+    @handle_ydb_errors
+    @invalidate_cursor_on_ydb_error
+    async def _execute_generic_query(
+        self, query: str, parameters: ParametersType | None = None
+    ) -> list[ydb.convert.ResultSet]:
+        settings = self._get_request_settings()
+        ydb_parameters = _as_ydb_parameters(parameters)
+
+        async def callee(
+            session: ydb.aio.QuerySession,
+        ) -> list[ydb.convert.ResultSet]:
+            return await self._materialize(
+                await session.execute(
+                    query=query,
+                    parameters=ydb_parameters,
+                    settings=settings,
+                )
+            )
+
+        return await self._session_pool.retry_operation_async(
+            callee,
+            retry_settings=self._retry_settings,
+        )
+
+    async def execute_scheme(
+        self,
+        query: str,
+        parameters: ParametersType | None = None,
+    ) -> None:
+        self._raise_if_closed()
+        self._raise_if_running()
+        if self._tx_context is not None:
+            self._connection._raise_if_current_cursor_running()
+
+        query = self._append_table_path_prefix(query)
+
+        if self._pyformat and parameters is not None:
+            query, parameters = convert_query_parameters(query, parameters)
+
+        ydb_parameters = _as_ydb_parameters(parameters)
+        self._begin_query()
+
+        result_list = await self._execute_generic_query(
+            query=query, parameters=ydb_parameters
+        )
+        self._fill_buffer(result_list)
+        self._finish_query()
+
+    async def executemany(
+        self, query: str, seq_of_parameters: Sequence[ParametersType]
+    ) -> None:
+        for parameters in seq_of_parameters:
+            await self.execute(query, parameters)
+
+    async def _invalidate_active_session(self) -> None:
+        self._clear_current_cursor()
+        self._stream = None
+        if self._session_owner is None:
+            await self._connection._invalidate_session()
+            return
+
+        session = self._session_owner
+        self._session_owner = None
+        try:
+            await session.delete()
+        finally:
+            await self._session_pool.release(session)
+
+    def _clear_current_cursor(self) -> None:
+        self._connection._clear_current_cursor(self)
+
+    def _register_current_cursor(self) -> None:
+        if self._tx_context is not None:
+            self._connection._set_current_cursor(self)
+
+    async def _release_owned_session(self) -> None:
+        if self._session_owner is None:
+            return
+
+        session = self._session_owner
+        self._session_owner = None
+        await self._session_pool.release(session)
+
+    async def _discard_owned_session(self) -> None:
+        if self._session_owner is None:
+            return
+
+        session = self._session_owner
+        self._session_owner = None
+        try:
+            await session.delete()
+        finally:
+            await self._session_pool.release(session)
+
+    async def _finish_stream(self) -> None:
+        self._stream = None
+        await self._release_owned_session()
+        self._clear_current_cursor()
+        self._finish_query()
+
+    def _reset_result(self) -> None:
+        super()._reset_result()
+        self._rowcount_accumulator = 0
+
+    def _update_result_set(
+        self,
+        result_set: ydb.convert.ResultSet,
+        replace_current: bool = True,
+    ) -> None:
+        # A streaming cursor reports the total number of fetched rows only
+        # after the stream is exhausted, so here the count is accumulated
+        # and the final value is set in _finish_query().
+        self._update_description(result_set)
+        self._rowcount_accumulator += len(result_set.rows)
+
+        new_rows_iter = self._rows_iterable(result_set)
+
+        if self._rows is None or replace_current:
+            self._rows = new_rows_iter
+        else:
+            self._rows = itertools.chain(self._rows, new_rows_iter)
+
+    def _finalize_rowcount(self) -> None:
+        self._rows_count = self._rowcount_accumulator
+
+    def _finish_query(self) -> None:
+        self._finalize_rowcount()
+        super()._finish_query()
+
+    @handle_ydb_errors
+    @invalidate_cursor_on_ydb_error
+    async def _load_next_result_set(self) -> bool:
+        if self._stream is None:
+            return False
+
+        try:
+            result_set = await self._stream.__anext__()
+        except StopAsyncIteration:
+            await self._finish_stream()
+            return False
+
+        self._update_result_set(result_set, replace_current=False)
+        return True
+
+    async def _prime_stream(self) -> None:
+        if (
+            not await self._load_next_result_set()
+            and self._state == CursorStatus.running
+        ):
+            await self._finish_stream()
+
+    @handle_ydb_errors
+    @invalidate_cursor_on_ydb_error
+    async def _execute_session_query_stream(
+        self,
+        query: str,
+        parameters: dict | None = None,
+    ) -> AsyncResponseContextIterator:
+        settings = self._get_request_settings()
+
+        async def callee() -> AsyncResponseContextIterator:
+            acquire_timeout = getattr(
+                self._retry_settings,
+                "max_session_acquire_timeout",
+                None,
+            )
+            session = await self._session_pool.acquire(timeout=acquire_timeout)
+            try:
+                stream = await session.transaction(self._tx_mode).execute(
+                    query=query,
+                    parameters=parameters,
+                    commit_tx=True,
+                    settings=settings,
+                )
+            except Exception:
+                await self._session_pool.release(session)
+                raise
+
+            self._session_owner = session
+            return stream
+
+        return await retry_operation_async(
+            callee,
+            self._retry_settings,
+        )
+
+    @handle_ydb_errors
+    @invalidate_cursor_on_ydb_error
+    async def _execute_transactional_query_stream(
+        self,
+        tx_context: ydb.aio.QueryTxContext,
+        query: str,
+        parameters: dict | None = None,
+    ) -> AsyncResponseContextIterator:
+        settings = self._get_request_settings()
+        return await tx_context.execute(
+            query=query,
+            parameters=parameters,
+            commit_tx=False,
+            settings=settings,
+        )
+
+    async def execute(
+        self,
+        query: str,
+        parameters: ParametersType | None = None,
+    ) -> None:
+        self._raise_if_closed()
+        self._raise_if_running()
+        if self._tx_context is not None:
+            self._connection._raise_if_current_cursor_running(self)
+
+        query = self._append_table_path_prefix(query)
+
+        if self._pyformat and parameters is not None:
+            query, parameters = convert_query_parameters(query, parameters)
+
+        ydb_parameters = _as_ydb_parameters(parameters)
+        self._begin_query()
+
+        if self._tx_context is not None:
+            self._stream = await self._execute_transactional_query_stream(
+                tx_context=self._tx_context,
+                query=query,
+                parameters=ydb_parameters,
+            )
+            self._register_current_cursor()
+        else:
+            self._stream = await self._execute_session_query_stream(
+                query=query,
+                parameters=ydb_parameters,
+            )
+
+        await self._prime_stream()
+
+    async def fetchone(self) -> tuple | None:
+        self._raise_if_closed()
+
+        while True:
+            row = self._fetchone_from_buffer()
+            if row is not None:
+                return row
+            if not await self._load_next_result_set():
+                return None
+
+    async def fetchmany(self, size: int | None = None) -> list:
+        self._raise_if_closed()
+        result: list[tuple] = []
+        target_size = size or self.arraysize
+
+        while len(result) < target_size:
+            row = await self.fetchone()
+            if row is None:
+                break
+            result.append(row)
+
+        return result
+
+    async def fetchall(self) -> list:
+        self._raise_if_closed()
+        result = list(self._fetchall_from_buffer())
+
+        while await self._load_next_result_set():
+            result.extend(self._fetchall_from_buffer())
+
+        return result
+
+    async def nextset(self) -> bool:
+        return False
+
+    async def close(self) -> None:
+        if self._state == CursorStatus.closed:
+            return
+
+        if self._state == CursorStatus.running:
+            if self._session_owner is not None and self._stream is not None:
+                self._stream.cancel()
+                self._finalize_rowcount()
+                self._stream = None
+                await self._discard_owned_session()
+            elif self._stream is not None:
+                async with self._stream:
+                    pass
+                await self._finish_stream()
+            else:
+                await self._release_owned_session()
+                self._clear_current_cursor()
+
+        self._stream = None
+        self._session_owner = None
+        self._clear_current_cursor()
+        self._state = CursorStatus.closed
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: object,
+    ) -> None:
+        await self.close()

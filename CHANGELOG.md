@@ -1,3 +1,8 @@
+## 0.1.25 ##
+* Add stream cursors (server-side cursor): connection.cursor(stream_results=True)
+* Guard transactional operations while a stream cursor is streaming
+* Sync and async stream cursors with lazy result-set fetching
+
 ## 0.1.24 ##
 * Fix DBAPI typing with newer YDB SDK releases
 
