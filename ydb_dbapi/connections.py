@@ -272,6 +272,7 @@ class Connection(BaseConnection):
             **kwargs,
         )
         self._current_cursor: Cursor | StreamCursor | None = None
+        self._active_stream_cursors: set[StreamCursor] = set()
 
     def _create_session_pool(
         self, driver_config: ydb.DriverConfig
@@ -350,6 +351,9 @@ class Connection(BaseConnection):
 
     @handle_ydb_errors
     def close(self) -> None:
+        for cursor in list(self._active_stream_cursors):
+            cursor.close()
+        self._active_stream_cursors.clear()
         if self._current_cursor is not None:
             self._current_cursor.close()
         try:
@@ -474,6 +478,12 @@ class Connection(BaseConnection):
         if cursor is None or self._current_cursor is cursor:
             self._current_cursor = None
 
+    def _register_stream_cursor(self, cursor: StreamCursor) -> None:
+        self._active_stream_cursors.add(cursor)
+
+    def _unregister_stream_cursor(self, cursor: StreamCursor) -> None:
+        self._active_stream_cursors.discard(cursor)
+
     def _raise_if_current_cursor_running(
         self, cursor: Cursor | None = None
     ) -> None:
@@ -527,6 +537,7 @@ class AsyncConnection(BaseConnection):
             **kwargs,
         )
         self._current_cursor: AsyncStreamCursor | None = None
+        self._active_stream_cursors: set[AsyncStreamCursor] = set()
 
     def _create_session_pool(
         self, driver_config: ydb.DriverConfig
@@ -607,6 +618,9 @@ class AsyncConnection(BaseConnection):
 
     @handle_ydb_errors
     async def close(self) -> None:
+        for cursor in list(self._active_stream_cursors):
+            await cursor.close()
+        self._active_stream_cursors.clear()
         if self._current_cursor is not None:
             await self._current_cursor.close()
         try:
@@ -736,6 +750,12 @@ class AsyncConnection(BaseConnection):
     ) -> None:
         if cursor is None or self._current_cursor is cursor:
             self._current_cursor = None
+
+    def _register_stream_cursor(self, cursor: AsyncStreamCursor) -> None:
+        self._active_stream_cursors.add(cursor)
+
+    def _unregister_stream_cursor(self, cursor: AsyncStreamCursor) -> None:
+        self._active_stream_cursors.discard(cursor)
 
     def _raise_if_current_cursor_running(
         self, cursor: AsyncStreamCursor | None = None
