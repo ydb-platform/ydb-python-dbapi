@@ -5,7 +5,9 @@ from .connections import async_connect
 from .connections import connect
 from .constants import *
 from .cursors import AsyncCursor
+from .cursors import AsyncStreamCursor
 from .cursors import Cursor
+from .cursors import StreamCursor
 from .errors import *
 from .version import VERSION
 
