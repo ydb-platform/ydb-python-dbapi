@@ -6,8 +6,6 @@ Python DBAPI to `YDB`, which provides both sync and async drivers and complies w
 
 ## Installation
 
-Requires Python 3.10 or newer and YDB Python SDK 3.30.0 or newer.
-
 ```shell
 pip install ydb-dbapi
 ```
