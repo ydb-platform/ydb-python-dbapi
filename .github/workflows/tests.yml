@@ -8,7 +8,8 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Python 3.9 has no setup-python build for Ubuntu 26.04.
+    runs-on: ubuntu-24.04
 
     concurrency:
       group: unit-${{ github.ref }}-${{ matrix.python-version }}-${{ matrix.poetry-version }}
