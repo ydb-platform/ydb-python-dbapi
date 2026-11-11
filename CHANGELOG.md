@@ -1,3 +1,5 @@
+* Raise the minimum supported versions to Python 3.10 and YDB SDK 3.30.0
+
 ## 0.1.24 ##
 * Fix DBAPI typing with newer YDB SDK releases
 

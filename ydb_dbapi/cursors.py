@@ -3,14 +3,13 @@ from __future__ import annotations
 import functools
 import itertools
 from collections.abc import AsyncIterator
+from collections.abc import Callable
 from collections.abc import Generator
 from collections.abc import Iterator
 from collections.abc import Sequence
 from inspect import iscoroutinefunction
 from typing import TYPE_CHECKING
 from typing import Any
-from typing import Callable
-from typing import Union
 
 import ydb
 
@@ -28,18 +27,16 @@ if TYPE_CHECKING:
     from .connections import AsyncConnection
     from .connections import Connection
 
-    ParametersType = Union[
+    ParametersType = (
         dict[
             str,
-            Union[
-                Any,
-                tuple[Any, Union[ydb.PrimitiveType, ydb.AbstractTypeBuilder]],
-                ydb.TypedValue,
-            ],
-        ],
-        list[Any],
-        tuple[Any, ...],
-    ]
+            Any
+            | tuple[Any, ydb.PrimitiveType | ydb.AbstractTypeBuilder]
+            | ydb.TypedValue,
+        ]
+        | list[Any]
+        | tuple[Any, ...]
+    )
 
 
 def _get_column_type(type_obj: Any) -> str:

@@ -6,12 +6,12 @@ import functools
 import importlib.util
 import json
 import re
+from collections.abc import Callable
 from enum import Enum
 from inspect import Parameter
 from inspect import iscoroutinefunction
 from inspect import signature
 from typing import Any
-from typing import Callable
 from typing import Union
 from typing import get_args
 from typing import get_origin
@@ -389,7 +389,7 @@ def _validate_positional_parameters(
     parameters: dict | list | tuple,
     positional_count: int,
 ) -> None:
-    if not isinstance(parameters, (list, tuple)):
+    if not isinstance(parameters, list | tuple):
         raise ProgrammingError(
             "Positional placeholders (%s) require parameters "
             "to be a list or tuple."
@@ -517,7 +517,7 @@ def convert_query_parameters(
 
     converted_params: dict = {}
 
-    if isinstance(parameters, (list, tuple)):
+    if isinstance(parameters, list | tuple):
         for i, value in enumerate(parameters, start=1):
             converted_params[f"$p{i}"] = _wrap_value(value)
     else:
